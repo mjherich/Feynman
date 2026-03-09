@@ -88,6 +88,10 @@ The system auto-selects the best available provider and falls back through the c
 - **RAG**: Cosine similarity over embeddings + Gemini Search Grounding
 - **Persistence**: Chat sessions in localStorage, book data in SQLite
 
+## Community
+
+Join our [Discord](https://discord.gg/BkYSkkwq) to share reading insights and suggest product ideas.
+
 ## License
 
 MIT
