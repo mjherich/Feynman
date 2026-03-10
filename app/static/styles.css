@@ -1174,56 +1174,77 @@ body {
   margin: 2px 0 0;
 }
 
-/* Perspectives panel in chat */
-.perspectives-panel {
-  margin-top: 12px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  overflow: hidden;
+/* Mind messages in chat timeline */
+.mind-message {
+  background: var(--bg-sidebar) !important;
+  border-left: 3px solid var(--border);
+  padding: 12px 16px !important;
+  margin: 4px 0 !important;
+  border-radius: 0 12px 12px 0 !important;
 }
-.perspectives-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  background: var(--bg-sidebar);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  letter-spacing: 0.03em;
-}
-.perspective-item {
-  padding: 12px 14px;
-  border-top: 1px solid var(--border);
-}
-.perspective-mind-row {
+.mind-msg-header {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 6px;
 }
-.perspective-avatar {
+.mind-msg-avatar {
   width: 24px;
   height: 24px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   color: #fff;
   flex-shrink: 0;
 }
-.perspective-name {
+.mind-msg-name {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
 }
-.perspective-text {
-  font-size: 13px;
+.mind-msg-content {
+  font-size: 14px;
   color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: 1.6;
 }
+
+/* Join / system notices */
+.chat-system-notice {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+.join-notice-inner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg-sidebar);
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+}
+.join-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+}
+.minds-loading-notice .loading-dot {
+  font-style: italic;
+}
+
+/* Legacy perspectives (deprecated) */
 .perspectives-actions {
   display: flex;
   gap: 8px;

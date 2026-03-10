@@ -12,6 +12,7 @@ let pollTimer = null;
 // Chat state
 let selectedBooks = new Map();
 let selectedMinds = new Map();
+let activeMinds = new Map();
 let chatSessions = [];
 let currentSessionId = null;
 let sessionCounter = 0;
@@ -477,6 +478,51 @@ function appendMsg(container, role, text, sources, opts) {
   container.scrollTop = container.scrollHeight;
 }
 
+function appendMindMsg(container, mindName, text) {
+  const el = document.createElement('div');
+  el.className = 'chat-message mind-message';
+  el.dataset.raw = text;
+  el.dataset.mindName = mindName;
+  const color = mindColor(mindName);
+  const initials = mindInitials(mindName);
+  const header = document.createElement('div');
+  header.className = 'mind-msg-header';
+  header.innerHTML = `<div class="mind-msg-avatar" style="background:${color}">${initials}</div><span class="mind-msg-name">${esc(mindName)}</span>`;
+  el.appendChild(header);
+  const content = document.createElement('div');
+  content.className = 'msg-content mind-msg-content';
+  content.innerHTML = renderMarkdown(text);
+  el.appendChild(content);
+  container.appendChild(el);
+  container.scrollTop = container.scrollHeight;
+}
+
+function appendJoinNotice(container, mindNames) {
+  const el = document.createElement('div');
+  el.className = 'chat-system-notice mind-join-notice';
+  const avatars = mindNames.map(n => {
+    const c = mindColor(n); const i = mindInitials(n);
+    return `<span class="join-avatar" style="background:${c}">${i}</span>`;
+  }).join('');
+  const names = mindNames.length === 1 ? mindNames[0]
+    : mindNames.slice(0, -1).join(', ') + ' and ' + mindNames[mindNames.length - 1];
+  el.innerHTML = `<div class="join-notice-inner">${avatars}<span>${esc(names)} joined the discussion</span></div>`;
+  container.appendChild(el);
+  container.scrollTop = container.scrollHeight;
+}
+
+function showMindsLoading(c) {
+  let el = document.getElementById('minds-loading-msg');
+  if (el) return;
+  el = document.createElement('div');
+  el.className = 'chat-system-notice minds-loading-notice';
+  el.id = 'minds-loading-msg';
+  el.innerHTML = '<div class="join-notice-inner"><span class="loading-dot">Inviting great minds to share their perspectives...</span></div>';
+  c.appendChild(el);
+  c.scrollTop = c.scrollHeight;
+}
+function removeMindsLoading() { document.getElementById('minds-loading-msg')?.remove(); }
+
 function showLoading(c) {
   const el = document.createElement('div');
   el.className = 'chat-message assistant';
@@ -494,6 +540,7 @@ function persistSessions() {
     const data = chatSessions.map(s => ({
       id: s.id, title: s.title, messages: s.messages,
       books: s.books instanceof Map ? [...s.books.entries()] : [],
+      activeMinds: s.activeMinds instanceof Map ? [...s.activeMinds.entries()] : [],
       updatedAt: s.updatedAt || 0,
     }));
     localStorage.setItem('chatSessions', JSON.stringify(data));
@@ -512,6 +559,7 @@ function restoreSessions() {
     chatSessions = data.map(s => ({
       ...s,
       books: new Map(s.books || []),
+      activeMinds: new Map(s.activeMinds || []),
       updatedAt: migrated ? (s.updatedAt || 0) : 0,
     }));
     if (!migrated) localStorage.setItem('ts_migrated', '1');
@@ -523,9 +571,10 @@ function restoreSessions() {
 function createSession() {
   saveCurrentSession();
   const id = 's-' + (++sessionCounter);
-  const session = { id, title: 'New chat', messages: [], books: new Map(), updatedAt: Date.now() };
+  const session = { id, title: 'New chat', messages: [], books: new Map(), activeMinds: new Map(), updatedAt: Date.now() };
   chatSessions.unshift(session);
   currentSessionId = id;
+  activeMinds.clear();
   document.getElementById('chat-messages').innerHTML = '';
   hideChatRightSidebar();
   renderChatHistory();
@@ -538,16 +587,25 @@ function saveCurrentSession() {
   const session = chatSessions.find(s => s.id === currentSessionId);
   if (!session) return;
   const msgs = [];
-  document.querySelectorAll('#chat-messages .chat-message:not(#loading-msg)').forEach(el => {
-    const role = el.classList.contains('user') ? 'user' : 'assistant';
-    const msg = { role, content: el.dataset.raw || el.textContent };
-    if (el.dataset.sources) try { msg.sources = JSON.parse(el.dataset.sources); } catch {}
-    if (el.dataset.opts) try { msg.opts = JSON.parse(el.dataset.opts); } catch {}
-    msgs.push(msg);
+  document.querySelectorAll('#chat-messages .chat-message:not(#loading-msg):not(.minds-loading-notice), #chat-messages .mind-join-notice').forEach(el => {
+    if (el.classList.contains('mind-join-notice')) {
+      const names = [...el.querySelectorAll('.join-avatar')].map(a => a.textContent);
+      const fullNames = el.querySelector('span:last-child')?.textContent?.replace(' joined the discussion', '') || '';
+      msgs.push({ role: 'system-notice', content: '', mindNames: fullNames.split(/ and |, /).map(s => s.trim()).filter(Boolean) });
+    } else if (el.classList.contains('mind-message')) {
+      msgs.push({ role: 'mind', content: el.dataset.raw || '', mindName: el.dataset.mindName || '' });
+    } else {
+      const role = el.classList.contains('user') ? 'user' : 'assistant';
+      const msg = { role, content: el.dataset.raw || el.textContent };
+      if (el.dataset.sources) try { msg.sources = JSON.parse(el.dataset.sources); } catch {}
+      if (el.dataset.opts) try { msg.opts = JSON.parse(el.dataset.opts); } catch {}
+      msgs.push(msg);
+    }
   });
   session.messages = msgs;
   session.books = new Map(selectedBooks);
   session.minds = new Map(selectedMinds);
+  session.activeMinds = new Map(activeMinds);
   if (msgs.length) session.updatedAt = Date.now();
 }
 
@@ -559,9 +617,18 @@ function switchToSession(id) {
   currentSessionId = id;
   selectedBooks = new Map(session.books);
   selectedMinds = new Map(session.minds || []);
+  activeMinds = new Map(session.activeMinds || []);
   const chatBox = document.getElementById('chat-messages');
   chatBox.innerHTML = '';
-  session.messages.forEach(m => appendMsg(chatBox, m.role, m.content, m.sources, m.opts));
+  for (const m of session.messages) {
+    if (m.role === 'mind') {
+      appendMindMsg(chatBox, m.mindName, m.content);
+    } else if (m.role === 'system-notice') {
+      appendJoinNotice(chatBox, m.mindNames || []);
+    } else {
+      appendMsg(chatBox, m.role, m.content, m.sources, m.opts);
+    }
+  }
   persistSessions();
   renderSelectedChips();
   restoreChatSidebar(session.messages);
@@ -733,8 +800,7 @@ async function sendGlobalChat(message) {
     // Trigger polling if any catalog books are being learned
     ensurePolling();
 
-    // Fetch mind perspectives in background
-    _fetchPerspectives(chatBox, message, bookContext, agentIds);
+    _inviteMindsToChat(chatBox, message, bookContext, agentIds);
   } catch (err) {
     if (currentSessionId !== sentSessionId) return;
     removeLoading();
@@ -746,17 +812,30 @@ async function sendGlobalChat(message) {
   }
 }
 
-async function _fetchPerspectives(chatBox, message, bookContext, agentIds) {
+async function _inviteMindsToChat(chatBox, message, bookContext, agentIds) {
   try {
-    const mindIds = [...selectedMinds.keys()];
+    const mindIds = [...activeMinds.keys()];
+    for (const [id] of selectedMinds) {
+      if (!mindIds.includes(id)) mindIds.push(id);
+    }
 
-    const existingNames = [...selectedMinds.values()].map(m => m.name);
-    const suggestBody = { count: 3, exclude: existingNames };
+    const allKnownNames = [...activeMinds.values(), ...selectedMinds.values()].map(m => m.name);
+    const suggestBody = { count: 3, exclude: allKnownNames };
     if (bookContext && bookContext.length) {
       suggestBody.book_title = bookContext[0].title;
       suggestBody.book_author = bookContext[0].author || '';
     } else {
       suggestBody.topic = message.slice(0, 100);
+    }
+
+    showMindsLoading(chatBox);
+
+    const newJoinedNames = [];
+    for (const [id, m] of selectedMinds) {
+      if (!activeMinds.has(id)) {
+        activeMinds.set(id, m);
+        newJoinedNames.push(m.name);
+      }
     }
 
     try {
@@ -772,14 +851,36 @@ async function _fetchPerspectives(chatBox, message, bookContext, agentIds) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: s.name, era: s.era || '', domain: s.domain || '' }),
           });
-          if (!mindIds.includes(mind.id)) mindIds.push(mind.id);
+          if (!mindIds.includes(mind.id)) {
+            mindIds.push(mind.id);
+            if (!activeMinds.has(mind.id)) {
+              activeMinds.set(mind.id, { id: mind.id, name: mind.name });
+              newJoinedNames.push(mind.name);
+            }
+          }
         } catch { /* skip */ }
       }
-    } catch { /* suggestion failed, proceed with manually selected */ }
+    } catch { /* suggestion failed, proceed with existing */ }
+
+    removeMindsLoading();
 
     if (!mindIds.length) return;
 
-    const panelBody = { message, mind_ids: mindIds };
+    if (newJoinedNames.length) {
+      appendJoinNotice(chatBox, newJoinedNames);
+    }
+
+    const history = [];
+    chatBox.querySelectorAll('.chat-message:not(#loading-msg):not(.minds-loading-notice)').forEach(el => {
+      if (el.classList.contains('mind-message')) {
+        history.push({ role: 'assistant', content: `[${el.dataset.mindName}]: ${el.dataset.raw}` });
+      } else {
+        const role = el.classList.contains('user') ? 'user' : 'assistant';
+        history.push({ role, content: el.dataset.raw || el.textContent });
+      }
+    });
+
+    const panelBody = { message, mind_ids: mindIds, history };
     if (bookContext?.length) panelBody.book_context = bookContext;
     if (agentIds?.length) panelBody.agent_ids = agentIds;
 
@@ -790,17 +891,16 @@ async function _fetchPerspectives(chatBox, message, bookContext, agentIds) {
     });
 
     if (panelData.responses?.length) {
-      // Find the last assistant message in chatBox and append perspectives after it
-      const lastAssistant = chatBox.querySelector('.chat-message.assistant:last-of-type');
-      if (lastAssistant) {
-        renderPerspectives(lastAssistant, panelData.responses);
+      for (const r of panelData.responses) {
+        if (r.response && !r.response.startsWith('[')) {
+          appendMindMsg(chatBox, r.mind_name, r.response);
+        }
       }
-      // Refresh minds list in case new ones were generated
       loadMinds();
     }
   } catch (err) {
-    // Perspectives are optional — fail silently
-    console.log('Perspectives fetch failed:', err.message);
+    removeMindsLoading();
+    console.log('Mind chat failed:', err.message);
   }
 }
 
@@ -1357,6 +1457,7 @@ function selectBookForChat(bookId) {
   currentSessionId = null;
   selectedBooks.clear();
   selectedMinds.clear();
+  activeMinds.clear();
   selectedBooks.set(bookId, book);
   window.location.hash = '#/';
 }
@@ -1941,16 +2042,24 @@ function _renderMindsGraph() {
 
   let _tooltipNode = null;
   let _tooltipInside = false;
+  let _hideTimer = null;
 
-  tooltip.addEventListener('mouseenter', () => { _tooltipInside = true; });
+  function _cancelHideTimer() { if (_hideTimer) { clearTimeout(_hideTimer); _hideTimer = null; } }
+
+  tooltip.addEventListener('mouseenter', () => { _tooltipInside = true; _cancelHideTimer(); });
   tooltip.addEventListener('mouseleave', () => {
     _tooltipInside = false;
-    _tooltipNode = null;
-    state.hoveredNode = null;
-    tooltip.classList.add('hidden');
+    _hideTimer = setTimeout(() => {
+      if (!_tooltipInside) {
+        _tooltipNode = null;
+        state.hoveredNode = null;
+        tooltip.classList.add('hidden');
+      }
+    }, 100);
   });
 
   function _showTooltip(n, anchorX, anchorY) {
+    _cancelHideTimer();
     if (_tooltipNode === n) return;
     _tooltipNode = n;
     if (n._isAdd) {
@@ -1988,8 +2097,13 @@ function _renderMindsGraph() {
 
   function _hideTooltip() {
     if (_tooltipInside) return;
-    _tooltipNode = null;
-    tooltip.classList.add('hidden');
+    _cancelHideTimer();
+    _hideTimer = setTimeout(() => {
+      if (!_tooltipInside) {
+        _tooltipNode = null;
+        tooltip.classList.add('hidden');
+      }
+    }, 200);
   }
 
   canvas.addEventListener('mousemove', (e) => {
@@ -2269,26 +2383,7 @@ function showCreateMindDialog() {
 }
 
 // Perspectives panel rendering (appended to assistant messages)
-function renderPerspectives(container, perspectives) {
-  if (!perspectives || !perspectives.length) return;
-  const panel = document.createElement('div');
-  panel.className = 'perspectives-panel';
-  let html = '<div class="perspectives-header"><span>Great Minds</span></div>';
-  for (const p of perspectives) {
-    const color = mindColor(p.mind_name);
-    const initials = mindInitials(p.mind_name);
-    html += `<div class="perspective-item">
-      <div class="perspective-mind-row">
-        <div class="perspective-avatar" style="background:${color}">${initials}</div>
-        <span class="perspective-name">${esc(p.mind_name)}</span>
-      </div>
-      <div class="perspective-text">${renderMarkdown(p.response)}</div>
-    </div>`;
-  }
-  panel.innerHTML = html;
-  container.appendChild(panel);
-  container.scrollTop = container.scrollHeight;
-}
+/* renderPerspectives removed — minds now render inline as chat messages */
 
 // ─── Init ───
 async function init() {
@@ -2312,6 +2407,7 @@ async function init() {
     currentSessionId = null;
     selectedBooks.clear();
     selectedMinds.clear();
+    activeMinds.clear();
     window.location.hash = '#/';
   });
 
@@ -2321,6 +2417,7 @@ async function init() {
     currentSessionId = null;
     selectedBooks.clear();
     selectedMinds.clear();
+    activeMinds.clear();
     window.location.hash = '#/';
   });
 
