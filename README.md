@@ -104,26 +104,26 @@ The system auto-selects the best available provider and falls back through the c
 
 ## Product Updates
 
-### Mar 10, 2026 — Great Minds: not just chat with books, but chat with great minds *(coming soon)*
+### Mar 10, 2026 — Great Minds *(coming soon)*
 
-We realized that the biggest value of AI-powered reading isn't just retrieving information from a book — it's having conversations that go far beyond any single text. So why stop at books? What if you could also learn alongside the great minds behind the ideas?
+Chat with books is just the starting point. The next step is to also chat and learn with great minds — scholars, academics, and great practitioners across every field.
 
-**Great Minds** introduces AI agents that simulate scholars, professors, academics, and great practitioners across every field — faithfully capturing how they think, argue, and reason, grounded in their actual works. Whether you're reading a specific book or exploring a new domain, these agents join the conversation as companions who read with you and discuss with you.
+AI agents simulate these thinkers, faithfully capturing how they reason and argue, grounded in their actual works. Whether you're reading a book or exploring a topic, they join as companions who read with you and discuss with you.
 
-- **Reading a book together** — When you chat about a book, relevant minds join in. Reading "Wealth of Nations"? Adam Smith explains his reasoning while Marx challenges it and Keynes offers a different lens. They don't just answer your questions — they bring perspectives you wouldn't have thought to ask about.
-- **Exploring a topic together** — Curious about consciousness, investing, or moral philosophy? A panel of great minds across eras and disciplines sits down with you to discuss, debate, and teach — each from their own unique vantage point.
+- **Reading a book together** — relevant minds join the conversation. Reading "Wealth of Nations"? Adam Smith explains his reasoning while Marx challenges it and Keynes offers a different lens.
+- **Exploring a topic together** — curious about consciousness or moral philosophy? A panel of great minds across eras sits down with you to discuss and debate.
 
-Think of it as having a study group of the most brilliant people in history, always available to read with you and think alongside you. See the full design in [`SPEC-great-minds.md`](SPEC-great-minds.md).
+Like having a study group of the most brilliant people in history, always available to think alongside you. Full design: [`SPEC-great-minds.md`](SPEC-great-minds.md).
 
-### Feb 10, 2026 — v1: Chat with books and build knowledge systems
+### Feb 10, 2026 — v1: Chat with Books
 
-The first version of Feynman. Born from a simple frustration: when entering a new field, I needed to figure out which books were worth reading and how their ideas connected — before committing hours to any single one.
+The first version. Born from a simple frustration: when entering a new field, I needed to figure out which books were worth reading and how their ideas connected — before committing hours to any single one.
 
-This release introduced two core capabilities: **chat with any book** using a multi-layered RAG skill system that grounds every answer in actual passages with citations, and **topic-driven knowledge building** that discovers relevant books via LLM, generates study questions, and teaches through conversation. The goal was to bring the Feynman method of learning — question-driven, multi-source, never passive — into a tool that makes it practical.
+Two core capabilities: **chat with any book** using a multi-layered RAG skill system that grounds every answer in actual passages with citations, and **topic-driven knowledge building** that discovers relevant books via LLM, generates study questions, and teaches through conversation. The goal was to bring the Feynman method — question-driven, multi-source, never passive — into a practical tool.
 
 ## Community
 
-Join our [Discord](https://discord.gg/BkYSkkwq) to share what you're reading, exchange reading methods, and tell us what you'd like to see in the product — or DM me directly on [Twitter/X](https://x.com/steve_yeow).
+Join the [Discord](https://discord.gg/BkYSkkwq) to share what you're reading, exchange reading methods, and tell me what you'd like to see in the product — or DM me directly on [Twitter/X](https://x.com/steve_yeow).
 
 ## License
 
