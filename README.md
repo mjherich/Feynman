@@ -4,6 +4,8 @@
 
 **Read books the way Feynman did. Ask questions, connect ideas across much broader sources than any single book, and let AI help you build a knowledge system.**
 
+**Coming soon: Chat with Great Minds — learn alongside AI agents that simulate great scholars, academics, and practitioners throughout history.**
+
 ### Why I built this
 
 Feynman is **not** a replacement for reading. I'm a devoted paper-book lover — the tactile act of flipping through physical pages puts me in a near-meditative state, and nothing replaces that.
@@ -104,7 +106,7 @@ The system auto-selects the best available provider and falls back through the c
 
 ## Product Updates
 
-### Mar 10, 2026 — Great Minds *(coming soon)*
+### Mar 10, 2026 — Chat with Great Minds *(coming soon)*
 
 Chat with books is just the starting point. The next step is to also chat and learn with great minds — scholars, academics, and great practitioners across every field.
 
