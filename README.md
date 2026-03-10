@@ -2,7 +2,7 @@
 
 > "You learn by asking questions, by thinking, and by experimenting." — Richard Feynman
 
-**Read books the way Feynman did. Ask questions, connect ideas across sources, and let AI help you build a knowledge system.**
+**Read books the way Feynman did. Ask questions, connect ideas across much broader sources than any single book, and let AI help you build a knowledge system.**
 
 ### Why I built this
 
