@@ -2,7 +2,7 @@
 
 > "You learn by asking questions, by thinking, and by experimenting." — Richard Feynman
 
-**Don't read books. Talk to them. Don't pick topics blindly. Let AI build your knowledge system.**
+**Read books the way Feynman did. Ask questions, connect ideas across sources, and let AI help you build a knowledge system.**
 
 ### Why I built this
 
@@ -20,9 +20,9 @@ In short: Feynman helps you read the way Feynman did — not replace reading its
 
 Feynman is a Socratic study companion powered by AcademiAI. It does two things:
 
-**1. Turn any book into a conversation** — Ask questions, get answers grounded in the book's actual content, with every claim traced back to a specific passage.
+**1. Turn any book into a conversation** — Ask questions and get answers grounded in the book's actual content, with every claim traced back to a specific passage. But it doesn't stop at the text — the AI brings in broader context and related knowledge, so you learn more than the book alone could teach you.
 
-**2. Turn any topic into a knowledge system** — Curious about microeconomics but don't know where to start? Feynman discovers the right books, generates the questions you should be asking, and teaches you through conversation — all grounded in real sources.
+**2. Turn any topic into a knowledge system** — Curious about microeconomics but don't know where to start? Feynman discovers the right books, generates the questions you should be asking, and teaches you through conversation — all grounded in real sources, enriched by knowledge that goes beyond any single book.
 
 ---
 
