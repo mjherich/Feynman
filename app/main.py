@@ -8,7 +8,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
+import os
+
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -70,6 +72,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ─── Pro: Auth middleware (only when ENABLE_AUTH=true) ───
+if os.getenv("ENABLE_AUTH"):
+    from .pro.auth import AuthMiddleware
+    app.add_middleware(AuthMiddleware)
+
+# ─── Pro: Stripe routes ───
+if os.getenv("STRIPE_SECRET_KEY"):
+    from .pro.stripe import router as stripe_router
+    app.include_router(stripe_router)
+
+# Quota helpers (no-op when auth is disabled)
+def _check_quota(request: Request, action: str) -> None:
+    if os.getenv("ENABLE_AUTH"):
+        from .pro.quota import check_quota
+        check_quota(request, action)
+
+def _track_usage(request: Request, action: str, tokens: int = 0) -> None:
+    if os.getenv("ENABLE_AUTH"):
+        from .pro.quota import track_usage
+        track_usage(request, action, tokens)
 
 static_dir = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
@@ -436,6 +459,19 @@ def api_search_book(payload: SearchBookRequest, background_tasks: BackgroundTask
         if agent and agent["status"] == "catalog":
             background_tasks.add_task(_learn_agent, agent_id)
     return {"books": results, "usage": _usage_dict(result)}
+
+
+# ─── Pro config endpoint ───
+
+@app.get("/api/pro/config")
+def pro_config() -> dict[str, Any]:
+    """Public config for frontend — safe to expose."""
+    return {
+        "auth_enabled": bool(os.getenv("ENABLE_AUTH")),
+        "supabase_url": os.getenv("SUPABASE_URL", ""),
+        "supabase_key": os.getenv("SUPABASE_ANON_KEY", os.getenv("SUPABASE_KEY", "")),
+        "stripe_enabled": bool(os.getenv("STRIPE_SECRET_KEY")),
+    }
 
 
 # ─── Agent endpoints ───

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Feynman</title>
-    <link rel="stylesheet" href="/static/styles.css?v=46" />
+    <link rel="stylesheet" href="/static/styles.css?v=47" />
   </head>
   <body>
     <div class="app-layout" id="app-layout">
@@ -33,7 +33,7 @@
           <span class="sidebar-label">Great Minds</span>
         </a>
         <div class="sidebar-history" id="chat-history-list"></div>
-        <div class="sidebar-bottom">
+        <div class="sidebar-bottom" id="sidebar-bottom">
           <div class="sidebar-profile" title="Profile">
             <div class="profile-avatar">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -298,10 +298,20 @@
           </div>
         </div>
 
+        <!-- ─── LANDING PAGE ─── -->
+        <div id="page-landing" class="page-view landing-page hidden"></div>
+
+        <!-- ─── LOGIN PAGE ─── -->
+        <div id="page-login" class="page-view login-page hidden"></div>
+
+        <!-- ─── SUBSCRIPTION PAGE ─── -->
+        <div id="page-subscription" class="page-view subscription-page hidden"></div>
+
       </div><!-- .app-main -->
     </div><!-- .app-layout -->
 
     <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
-    <script src="/static/app.js?v=46"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+    <script src="/static/app.js?v=47"></script>
   </body>
 </html>

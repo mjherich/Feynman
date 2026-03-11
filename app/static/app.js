@@ -25,6 +25,136 @@ let loadingTopics = new Set();
 // Onboarding state
 let userName = localStorage.getItem('userName') || '';
 
+// ─── Pro Auth State ───
+let proConfig = null;
+let supabaseClient = null;
+let currentUser = null;
+let authToken = null;
+
+async function loadProConfig() {
+  try {
+    proConfig = await api('/api/pro/config');
+    if (proConfig.auth_enabled) {
+      window.FEYNMAN_PRO = true;
+    }
+  } catch { proConfig = { auth_enabled: false }; }
+}
+
+async function initSupabase() {
+  if (!proConfig?.auth_enabled || !proConfig.supabase_url || !proConfig.supabase_key) return;
+  try {
+    const { createClient } = window.supabase || {};
+    if (!createClient) return;
+    supabaseClient = createClient(proConfig.supabase_url, proConfig.supabase_key);
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (session) {
+      currentUser = session.user;
+      authToken = session.access_token;
+      userName = session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || userName;
+      localStorage.setItem('userName', userName);
+    }
+    supabaseClient.auth.onAuthStateChange((_event, session) => {
+      if (session) {
+        currentUser = session.user;
+        authToken = session.access_token;
+        userName = session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || '';
+        localStorage.setItem('userName', userName);
+      } else {
+        currentUser = null;
+        authToken = null;
+      }
+      updateAuthUI();
+    });
+  } catch (e) { console.warn('Supabase init failed:', e); }
+}
+
+function updateAuthUI() {
+  const bottomEl = document.getElementById('sidebar-bottom');
+  if (!bottomEl) return;
+  if (window.FEYNMAN_PRO) {
+    if (currentUser) {
+      bottomEl.innerHTML = `
+        <a href="#/subscription" class="sidebar-profile-row" title="Manage subscription">
+          <div class="profile-avatar">
+            ${currentUser.user_metadata?.avatar_url
+              ? `<img src="${esc(currentUser.user_metadata.avatar_url)}" style="width:28px;height:28px;border-radius:50%" />`
+              : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`
+            }
+          </div>
+          <div class="sidebar-label profile-info">
+            <span class="profile-name">${esc(userName || 'Account')}</span>
+            <span class="profile-tier">${esc(currentUser.email || '')}</span>
+          </div>
+        </a>`;
+    } else {
+      bottomEl.innerHTML = `
+        <a href="#/login" class="sidebar-profile-row sidebar-signin-row" title="Sign in">
+          <div class="profile-avatar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+          </div>
+          <span class="sidebar-label">Sign in</span>
+        </a>`;
+    }
+  }
+}
+
+async function signInWithEmail(email, password) {
+  if (!supabaseClient) return;
+  const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+  window.location.hash = '#/';
+}
+
+async function signUpWithEmail(email, password) {
+  if (!supabaseClient) return;
+  const { data, error } = await supabaseClient.auth.signUp({
+    email, password,
+    options: { emailRedirectTo: window.location.origin + '/#/' },
+  });
+  if (error) throw error;
+  if (data?.user?.identities?.length === 0) {
+    throw new Error('This email is already registered. Please sign in instead.');
+  }
+  return data;
+}
+
+async function signOut() {
+  if (!supabaseClient) return;
+  await supabaseClient.auth.signOut();
+  currentUser = null;
+  authToken = null;
+  window.location.hash = '#/';
+  updateAuthUI();
+}
+window.signOut = signOut;
+
+function showUpgradeModal(detail) {
+  const overlay = document.createElement('div');
+  overlay.className = 'mind-add-dialog';
+  const msg = detail?.message || 'You\'ve reached the free tier limit. Upgrade to Pro for unlimited access.';
+  overlay.innerHTML = `
+    <div class="mind-add-form" style="max-width:400px;text-align:center">
+      <h3 style="margin-bottom:12px">Upgrade to Pro</h3>
+      <p style="font-size:14px;color:var(--text-secondary);margin-bottom:20px;line-height:1.5">${esc(msg)}</p>
+      <div style="display:flex;gap:12px;justify-content:center">
+        <button class="onboarding-btn" id="upgrade-dismiss">Maybe Later</button>
+        <button class="primary-btn" id="upgrade-go" style="padding:10px 24px">Upgrade — $10/mo</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#upgrade-dismiss').addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  overlay.querySelector('#upgrade-go').addEventListener('click', async () => {
+    try {
+      const data = await api('/api/pro/create-checkout-session', { method: 'POST' });
+      if (data.url) window.location.href = data.url;
+    } catch (err) {
+      alert('Checkout failed: ' + err.message);
+    }
+    overlay.remove();
+  });
+}
+
 const MOCK_QUESTIONS = [
   'What is the central thesis of this book?',
   'How does the author support their main argument?',
@@ -32,6 +162,62 @@ const MOCK_QUESTIONS = [
   'How does this relate to what you already know?',
   'What are the practical implications?',
 ];
+
+// ─── Pro Pages ───
+function renderLoginPage() {
+  const el = document.getElementById('page-login');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="home-center" style="max-width:400px">
+      <div class="greeting-row" style="justify-content:center;margin-bottom:24px">
+        <svg class="greeting-logo" width="40" height="40" viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">
+          <rect x="24" y="0" width="8" height="4" fill="#FDCB6E"/><rect x="26" y="4" width="4" height="4" fill="#B8B8B8"/>
+          <rect x="8" y="8" width="40" height="28" fill="#DA7756"/><rect x="12" y="12" width="32" height="20" fill="#FFF1E0"/>
+          <rect x="16" y="16" width="8" height="8" fill="#2D3436"/><rect x="32" y="16" width="8" height="8" fill="#2D3436"/>
+          <rect x="18" y="18" width="4" height="4" fill="#fff"/><rect x="34" y="18" width="4" height="4" fill="#fff"/>
+          <rect x="22" y="28" width="12" height="2" fill="#C45E3E"/><rect x="18" y="38" width="4" height="8" fill="#B8B8B8"/>
+          <rect x="34" y="38" width="4" height="8" fill="#B8B8B8"/>
+        </svg>
+        <h1 class="greeting">Welcome to Feynman</h1>
+      </div>
+      <p style="text-align:center;color:var(--text-muted);margin-bottom:32px;font-size:14px">Sign in to save your progress and unlock Pro features</p>
+      <form id="auth-form" class="auth-email-form" onsubmit="return false">
+        <input id="auth-email" class="onboarding-input" type="email" placeholder="Email" required autocomplete="email" />
+        <input id="auth-password" class="onboarding-input" type="password" placeholder="Password" required autocomplete="current-password" minlength="6" />
+        <div id="auth-error" class="auth-error"></div>
+        <div id="auth-success" class="auth-success"></div>
+        <button id="auth-submit-btn" class="onboarding-btn auth-submit-btn" type="submit">Sign in</button>
+        <p class="auth-toggle-text"><span id="auth-toggle-label">Don't have an account?</span> <a href="javascript:void(0)" id="auth-toggle-link">Sign up</a></p>
+      </form>
+      <p style="text-align:center;color:var(--text-muted);margin-top:16px;font-size:12px"><a href="#/" style="color:var(--text-muted);text-decoration:underline">Continue without account</a></p>
+    </div>`;
+  let isSignUp = false;
+  const form = el.querySelector('#auth-form'), emailInput = el.querySelector('#auth-email'), passwordInput = el.querySelector('#auth-password');
+  const submitBtn = el.querySelector('#auth-submit-btn'), toggleLink = el.querySelector('#auth-toggle-link'), toggleLabel = el.querySelector('#auth-toggle-label');
+  const errorEl = el.querySelector('#auth-error'), successEl = el.querySelector('#auth-success');
+  function updateMode() { submitBtn.textContent = isSignUp ? 'Sign up' : 'Sign in'; toggleLabel.textContent = isSignUp ? 'Already have an account?' : "Don't have an account?"; toggleLink.textContent = isSignUp ? 'Sign in' : 'Sign up'; passwordInput.autocomplete = isSignUp ? 'new-password' : 'current-password'; errorEl.textContent = ''; successEl.textContent = ''; }
+  toggleLink.addEventListener('click', () => { isSignUp = !isSignUp; updateMode(); });
+  form.addEventListener('submit', async (e) => { e.preventDefault(); const email = emailInput.value.trim(), password = passwordInput.value; if (!email || !password) return; errorEl.textContent = ''; successEl.textContent = ''; submitBtn.disabled = true; submitBtn.textContent = isSignUp ? 'Signing up...' : 'Signing in...'; try { if (isSignUp) { await signUpWithEmail(email, password); successEl.textContent = 'Check your email to confirm your account, then sign in.'; isSignUp = false; updateMode(); } else { await signInWithEmail(email, password); } } catch (err) { errorEl.textContent = err.message || 'Something went wrong'; } finally { submitBtn.disabled = false; updateMode(); } });
+}
+
+function renderSubscriptionPage() {
+  const el = document.getElementById('page-subscription');
+  if (!el) return;
+  el.innerHTML = '<div class="sub-page"><div class="sub-loading"><span class="loading-dot">Loading...</span></div></div>';
+  (async () => {
+    let sub = { tier: 'free', subscription: null };
+    try { sub = await api('/api/pro/subscription'); } catch {}
+    const isPro = sub.tier === 'pro';
+    const freeFeatures = [{ icon: '💬', label: 'Chat with Any Book', value: '10 / day' },{ icon: '🧠', label: 'Talk to Great Minds', value: '5 / day' },{ icon: '📚', label: 'Personal Library', value: '5 books' },{ icon: '📤', label: 'Upload Your Own Books', value: '3 / day' },{ icon: '🔍', label: 'AI Book Discovery', value: '3 / day' },{ icon: '✨', label: 'Summon Famous Minds', value: '1 / day' },{ icon: '🎭', label: 'Create Mind from Any Source', value: '1 mind' }];
+    const proFeatures = [{ icon: '💬', label: 'Chat with Any Book', value: '100 / day' },{ icon: '🧠', label: 'Talk to Great Minds', value: '50 / day' },{ icon: '📚', label: 'Personal Library', value: '50 books' },{ icon: '📤', label: 'Upload Your Own Books', value: '20 / day' },{ icon: '🔍', label: 'AI Book Discovery', value: '30 / day' },{ icon: '✨', label: 'Summon Famous Minds', value: '20 / day' },{ icon: '🎭', label: 'Create Mind from Any Source', value: '20 minds' }];
+    const featureRow = (f, isPro) => `<div class="sub-feature-row"><span class="sub-feature-icon">${f.icon}</span><span class="sub-feature-label">${esc(f.label)}</span><span class="sub-feature-value ${isPro ? 'pro-value' : ''}">${esc(f.value)}</span></div>`;
+    el.innerHTML = `<div class="sub-page"><div class="sub-header"><h1 class="sub-title">Subscription</h1><p class="sub-subtitle">Read smarter. Think deeper. Learn from the greatest minds in history.</p></div><div class="sub-cards"><div class="sub-card ${!isPro ? 'sub-card-active' : ''}"><div class="sub-card-head"><div class="sub-plan-name"><span>Free</span>${!isPro ? '<span class="sub-badge">Current</span>' : ''}</div><div class="sub-price">$0<span>/mo</span></div><p class="sub-price-note">Experience the core of Feynman</p></div><div class="sub-card-body"><div class="sub-features-title">What's included</div>${freeFeatures.map(f => featureRow(f, false)).join('')}</div>${!isPro ? '<div class="sub-card-foot"><button class="sub-btn sub-btn-secondary" disabled>Current Plan</button></div>' : ''}</div><div class="sub-card sub-card-pro ${isPro ? 'sub-card-active' : ''}"><div class="sub-card-head"><div class="sub-plan-name"><span>Pro</span>${isPro ? '<span class="sub-badge sub-badge-pro">Current</span>' : '<span class="sub-badge sub-badge-pro">Recommended</span>'}</div><div class="sub-price">$10<span>/mo</span></div><p class="sub-price-note">For serious readers and lifelong learners</p></div><div class="sub-card-body"><div class="sub-features-title">Everything in Free, plus</div>${proFeatures.map(f => featureRow(f, true)).join('')}</div><div class="sub-card-foot">${isPro ? `<button class="sub-btn sub-btn-manage" id="sub-manage-btn">Manage Subscription</button>${sub.subscription?.cancel_at_period_end ? '<p class="sub-cancel-note">Cancels at end of billing period</p>' : ''}` : '<button class="sub-btn sub-btn-primary" id="sub-upgrade-btn">Upgrade to Pro</button>'}</div></div></div><div class="sub-explainer"><div class="sub-explainer-title">What can you do with Feynman?</div><div class="sub-explainer-grid"><div class="sub-explainer-item"><div class="sub-explainer-icon">💬</div><div class="sub-explainer-text"><strong>Chat with Books</strong> — Ask questions, get insights, and have deep conversations with any book in your library</div></div><div class="sub-explainer-item"><div class="sub-explainer-icon">🧠</div><div class="sub-explainer-text"><strong>Talk to Great Minds</strong> — Have conversations with AI-powered personas of history's greatest thinkers</div></div><div class="sub-explainer-item"><div class="sub-explainer-icon">🔍</div><div class="sub-explainer-text"><strong>AI Book Discovery</strong> — Describe a topic and let AI find, index, and add relevant books to your library</div></div><div class="sub-explainer-item"><div class="sub-explainer-icon">✨</div><div class="sub-explainer-text"><strong>Summon Famous Minds</strong> — Generate AI personas of well-known thinkers, synthesized from their life's work</div></div><div class="sub-explainer-item"><div class="sub-explainer-icon">🎭</div><div class="sub-explainer-text"><strong>Create Custom Minds</strong> — Build a mind from any source — a Twitter profile, blog, or pasted text</div></div><div class="sub-explainer-item"><div class="sub-explainer-icon">📤</div><div class="sub-explainer-text"><strong>Upload Your Books</strong> — Bring your own PDFs and documents — AI indexes them for instant conversations</div></div></div></div><div class="sub-footer">${currentUser ? `<p class="sub-email">${esc(currentUser.email || '')}</p><button class="sub-signout-btn" onclick="signOut()">Sign Out</button>` : `<button class="sub-btn sub-btn-signin" onclick="window.location.hash='#/login'">Sign in to manage your account</button>`}</div></div>`;
+    const upgradeBtn = document.getElementById('sub-upgrade-btn');
+    if (upgradeBtn) { upgradeBtn.addEventListener('click', async () => { if (!currentUser) { window.location.hash = '#/login'; return; } upgradeBtn.textContent = 'Redirecting...'; upgradeBtn.disabled = true; try { const data = await api('/api/pro/create-checkout-session', { method: 'POST' }); if (data.url) window.location.href = data.url; } catch (err) { alert('Checkout failed: ' + err.message); upgradeBtn.textContent = 'Upgrade to Pro'; upgradeBtn.disabled = false; } }); }
+    const manageBtn = document.getElementById('sub-manage-btn');
+    if (manageBtn) { manageBtn.addEventListener('click', async () => { try { const data = await api('/api/pro/create-portal-session', { method: 'POST' }); if (data.url) window.location.href = data.url; } catch (err) { alert('Portal failed: ' + err.message); } }); }
+  })();
+}
 
 // ─── Greeting ───
 function getGreeting() {
@@ -49,16 +235,713 @@ let mindChatHistory = [];
 // ─── Router ───
 function getRoute() {
   const hash = window.location.hash || '#/';
-  if (hash === '#/' || hash === '#') return { page: 'home' };
+  if (hash === '#/landing') return { page: 'landing' };
+  if (hash === '#/' || hash === '#') {
+    if (!currentUser && window.FEYNMAN_PRO) return { page: 'landing' };
+    return { page: 'home' };
+  }
   if (hash === '#/chat') return { page: 'chat' };
   if (hash === '#/chats') return { page: 'chats' };
   if (hash === '#/library') return { page: 'library' };
   if (hash === '#/minds') return { page: 'minds' };
+  if (hash === '#/login') return { page: 'login' };
+  if (hash.startsWith('#/subscription')) return { page: 'subscription' };
   const mm = hash.match(/^#\/mind\/(.+)$/);
   if (mm) return { page: 'mind', id: mm[1] };
   const m = hash.match(/^#\/book\/(.+)$/);
   if (m) return { page: 'book', id: m[1] };
   return { page: 'home' };
+}
+
+// ─── Landing Page ───
+const LP_MINDS = [
+  { name: 'Richard Feynman', domain: 'physics', color: '#e76f51' },
+  { name: 'Aristotle', domain: 'philosophy', color: '#264653' },
+  { name: 'Marie Curie', domain: 'science', color: '#2a9d8f' },
+  { name: 'Ada Lovelace', domain: 'computing', color: '#6d597a' },
+  { name: 'Elon Musk', domain: 'engineering, business', color: '#0077b6' },
+  { name: 'Steve Jobs', domain: 'design, business', color: '#355070' },
+  { name: 'Albert Einstein', domain: 'physics', color: '#457b9d' },
+  { name: 'Socrates', domain: 'philosophy', color: '#264653' },
+  { name: 'Charlie Munger', domain: 'investing, psychology', color: '#9b2226' },
+  { name: 'Leonardo da Vinci', domain: 'art, science', color: '#b56576' },
+  { name: 'Nikola Tesla', domain: 'engineering', color: '#0077b6' },
+  { name: 'Paul Graham', domain: 'startups, writing', color: '#588157' },
+  { name: 'Alan Turing', domain: 'computing', color: '#264653' },
+  { name: 'Nassim Taleb', domain: 'risk, philosophy', color: '#9b2226' },
+  { name: 'Charles Darwin', domain: 'biology, science', color: '#588157' },
+  { name: 'Ray Dalio', domain: 'investing, systems', color: '#355070' },
+];
+
+let _lpGraphAnim = null;
+let _lpGraphSim = null;
+let _landingChatTimer = null;
+
+function _stopLandingAnimations() {
+  if (_landingChatTimer) { clearTimeout(_landingChatTimer); _landingChatTimer = null; }
+  if (_lpSearchTimer) { clearTimeout(_lpSearchTimer); _lpSearchTimer = null; }
+  if (_lpGraphAnim) { cancelAnimationFrame(_lpGraphAnim); _lpGraphAnim = null; }
+  if (_lpGraphSim) { _lpGraphSim.stop(); _lpGraphSim = null; }
+  _lpHighlightQuery = '';
+  _lpDiscoverActive = false;
+  _lpDiscoverNode = null;
+}
+
+function renderLandingPage() {
+  const el = document.getElementById('page-landing');
+  if (!el) return;
+  _stopLandingAnimations();
+
+  const demoScenes = [
+    {
+      title: 'Thinking, Fast and Slow',
+      bookChip: 'Thinking, Fast and Slow',
+      messages: [
+        { role: 'user', text: 'What are System 1 and System 2?' },
+        { role: 'assistant', text: 'System 1 operates automatically and quickly, with little effort — it\'s your intuition. System 2 allocates attention to effortful mental activities, like complex math. Most of what we think originates in System 1, but System 2 takes over when things get difficult.', sources: ['Ch.1 Two Systems', 'Ch.2 Attention and Effort'] },
+        { role: 'user', text: 'How does this affect our decisions?' },
+        { role: 'loading', text: 'Inviting great minds to share their perspectives...' },
+        { role: 'join', names: ['Richard Feynman', 'Charlie Munger'] },
+        { role: 'mind', name: 'Richard Feynman', color: '#e76f51', text: 'The key is to never fool yourself — and you are the easiest person to fool. System 1 is exactly that trap. You have to force yourself to think slowly about things that feel obvious.' },
+        { role: 'mind', name: 'Charlie Munger', color: '#9b2226', text: 'I call these "standard mental errors." Knowing the 25 cognitive biases gives you an enormous edge. Most people never learn to distrust their own thinking.' },
+      ]
+    },
+    {
+      title: 'General Chat',
+      messages: [
+        { role: 'user', text: 'How should I think about building a startup?' },
+        { role: 'assistant', text: 'Start by finding a real problem that you personally understand deeply. The best startups come from founders building something they themselves need. Focus on a small group of users who love your product rather than a large group who merely like it.' },
+        { role: 'loading', text: 'Inviting great minds to share their perspectives...' },
+        { role: 'join', names: ['Paul Graham'] },
+        { role: 'mind', name: 'Paul Graham', color: '#588157', text: 'Make something people want. That\'s the core of it. Talk to users, build fast, iterate. Most startups die because they build something nobody wants, not because of competition.' },
+      ]
+    },
+    {
+      title: 'The Art of War',
+      bookChip: 'The Art of War',
+      messages: [
+        { role: 'user', text: 'What is the supreme art of war?' },
+        { role: 'assistant', text: '"The supreme art of war is to subdue the enemy without fighting." Sun Tzu argues that true mastery lies in achieving objectives through strategy and positioning — making conflict unnecessary.', sources: ['Ch.3 Strategic Attack'] },
+        { role: 'loading', text: 'Inviting great minds to share their perspectives...' },
+        { role: 'join', names: ['Elon Musk', 'Charlie Munger'] },
+        { role: 'mind', name: 'Charlie Munger', color: '#9b2226', text: 'This maps perfectly to business. The best competitive advantage avoids competition entirely. Find a niche where you can be the only one, not the best one.' },
+        { role: 'mind', name: 'Elon Musk', color: '#0077b6', text: 'Sometimes you have to fight — the key is choosing which battles are worth it. First principles thinking helps you see which fights have asymmetric upside.' },
+      ]
+    },
+  ];
+
+  el.innerHTML = `
+    <div class="lp-container">
+      <section class="lp-hero">
+        <div class="lp-hero-center">
+          <div class="greeting-row">
+            <svg class="greeting-logo" width="40" height="40" viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">
+              <rect x="24" y="0" width="8" height="4" fill="#FDCB6E"/>
+              <rect x="26" y="4" width="4" height="4" fill="#B8B8B8"/>
+              <rect x="8" y="8" width="40" height="28" fill="#DA7756"/>
+              <rect x="12" y="12" width="32" height="20" fill="#FFF1E0"/>
+              <rect x="16" y="16" width="8" height="8" fill="#2D3436"/>
+              <rect x="32" y="16" width="8" height="8" fill="#2D3436"/>
+              <rect x="18" y="18" width="4" height="4" fill="#fff"/>
+              <rect x="34" y="18" width="4" height="4" fill="#fff"/>
+              <rect x="22" y="28" width="12" height="2" fill="#C45E3E"/>
+              <rect x="18" y="38" width="4" height="8" fill="#B8B8B8"/>
+              <rect x="34" y="38" width="4" height="8" fill="#B8B8B8"/>
+            </svg>
+            <h1 class="greeting lp-greeting">Chat with books, great minds will join in.</h1>
+            <p class="lp-hero-subtitle">Greatest minds read with you, discuss with you, and help you build the knowledge you need.</p>
+          </div>
+          <div class="chat-composer lp-composer">
+            <div class="selected-chips" id="lp-selected-chips"></div>
+            <textarea class="composer-input" id="lp-composer-input" rows="1" placeholder="Ask about books or topics — great minds will join in..." readonly></textarea>
+            <div class="composer-toolbar">
+              <div class="composer-left">
+                <button type="button" class="composer-icon-btn" disabled title="Books & upload">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </button>
+                <button type="button" class="composer-icon-btn composer-minds-btn" disabled title="Invite great minds">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="8" r="2.5"/><circle cx="8" cy="18" r="2.5"/><circle cx="18" cy="18" r="2"/><line x1="8.2" y1="7.2" x2="15.8" y2="7.2"/><line x1="7" y1="8.3" x2="7.5" y2="15.5"/><line x1="10.2" y1="17.2" x2="16" y2="17.8"/><line x1="16.5" y1="10.3" x2="17.5" y2="16"/></svg>
+                </button>
+              </div>
+              <button type="button" class="composer-send-btn" disabled title="Send">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="home-starters" id="lp-starters">
+            <button class="starter-pill" disabled>Key ideas in "Thinking, Fast and Slow"?</button>
+            <button class="starter-pill" disabled>Teach me the fundamentals of philosophy</button>
+            <button class="starter-pill" disabled>Best books on cognitive psychology?</button>
+            <button class="starter-pill" disabled>Help me understand machine learning</button>
+          </div>
+        </div>
+
+        <div class="lp-demo-area" id="lp-chat-body"></div>
+
+        <div class="lp-hero-actions">
+          <button class="lp-cta-primary" id="lp-get-started">Get Started Free</button>
+          <button class="lp-cta-secondary" id="lp-explore">Explore Library</button>
+        </div>
+        <p class="lp-hero-note">No credit card required</p>
+      </section>
+
+      <section class="lp-minds-section">
+        <div class="lp-minds-toolbar">
+          <input type="text" id="lp-minds-search" placeholder="Search minds..." autocomplete="off" readonly />
+          <button class="lp-minds-toolbar-btn" disabled>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Invite a Mind
+          </button>
+          <button class="lp-minds-toolbar-btn" disabled>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="m10 13 2 2 4-4" stroke-width="2"/></svg>
+            Create Your Mind
+          </button>
+        </div>
+        <div class="lp-minds-canvas-wrap" id="lp-minds-canvas-wrap"></div>
+      </section>
+
+      <section class="lp-bottom-cta">
+        <h2>Start learning the Feynman way</h2>
+        <p>"You learn by asking questions, by thinking, and by experimenting." — Richard Feynman</p>
+        <button class="lp-cta-primary" id="lp-bottom-start">Get Started Free</button>
+      </section>
+    </div>`;
+
+  document.getElementById('lp-get-started').addEventListener('click', () => {
+    window.location.hash = currentUser ? '#/' : '#/login';
+  });
+  document.getElementById('lp-explore').addEventListener('click', () => {
+    window.location.hash = '#/library';
+  });
+  document.getElementById('lp-bottom-start').addEventListener('click', () => {
+    window.location.hash = currentUser ? '#/' : '#/login';
+  });
+
+  _startLandingChatDemo(demoScenes);
+  _renderLandingMindsGraph();
+  _startLandingSearchDemo();
+}
+
+let _lpHighlightQuery = '';
+let _lpSearchTimer = null;
+let _lpDiscoverActive = false;
+let _lpDiscoverNode = null;
+
+function _startLandingSearchDemo() {
+  if (_lpSearchTimer) { clearTimeout(_lpSearchTimer); _lpSearchTimer = null; }
+
+  const input = document.getElementById('lp-minds-search');
+  if (!input) return;
+
+  function typeTerm(term, cb) {
+    input.value = '';
+    _lpHighlightQuery = '';
+    let i = 0;
+    function typeNext() {
+      if (i < term.length) {
+        i++;
+        input.value = term.slice(0, i);
+        _lpHighlightQuery = input.value.toLowerCase();
+        _lpSearchTimer = setTimeout(typeNext, 100 + Math.random() * 60);
+      } else {
+        _lpSearchTimer = setTimeout(cb, 2500);
+      }
+    }
+    typeNext();
+  }
+
+  function clearTerm(cb) {
+    const term = input.value;
+    let i = term.length;
+    function delNext() {
+      if (i > 0) {
+        i--;
+        input.value = term.slice(0, i);
+        _lpHighlightQuery = input.value.toLowerCase();
+        _lpSearchTimer = setTimeout(delNext, 40);
+      } else {
+        _lpHighlightQuery = '';
+        _lpSearchTimer = setTimeout(cb, 600);
+      }
+    }
+    delNext();
+  }
+
+  function simulateDiscover(cb) {
+    _lpDiscoverActive = true;
+    _lpSearchTimer = setTimeout(() => {
+      const newMind = { name: 'Galileo Galilei', domain: 'physics, astronomy', color: '#457b9d' };
+      const ini = newMind.name.split(/\s+/).slice(0, 2).map(w => w[0]).join('');
+      const tok = newMind.domain.split(/[,;\/&]+/).map(d => d.trim()).filter(Boolean);
+      _lpDiscoverNode = {
+        id: 'lp_new_' + Date.now(), name: newMind.name, domain: newMind.domain,
+        color: newMind.color, initials: ini, tokens: tok,
+        _newAt: performance.now(),
+      };
+      _lpDiscoverActive = false;
+      _lpSearchTimer = setTimeout(cb, 6000);
+    }, 2500);
+  }
+
+  function runCycle() {
+    typeTerm('physics', () => {
+      clearTerm(() => {
+        simulateDiscover(() => {
+          _lpDiscoverNode = null;
+          _lpSearchTimer = setTimeout(runCycle, 1500);
+        });
+      });
+    });
+  }
+
+  _lpSearchTimer = setTimeout(runCycle, 2500);
+}
+
+function _renderLandingMindsGraph() {
+  const container = document.getElementById('lp-minds-canvas-wrap');
+  if (!container) return;
+
+  const minds = LP_MINDS;
+  const tokens = m => (m.domain || '').split(/[,;\/&]+/).map(d => d.trim()).filter(Boolean);
+  const nodes = minds.map((m, i) => ({
+    id: 'lp_' + i, name: m.name, domain: m.domain,
+    color: m.color, initials: m.name.split(/\s+/).slice(0, 2).map(w => w[0]).join(''),
+    tokens: tokens(m),
+  }));
+  const links = [];
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const shared = nodes[i].tokens.filter(t => nodes[j].tokens.some(u => t === u || t.includes(u) || u.includes(t)));
+      if (shared.length > 0) links.push({ source: nodes[i].id, target: nodes[j].id, strength: shared.length });
+    }
+  }
+  if (!links.length && nodes.length > 1) {
+    for (let i = 1; i < nodes.length; i++) links.push({ source: nodes[0].id, target: nodes[i].id, strength: 0.3 });
+  }
+
+  const ADD_R = 18;
+  const addNode = { id: '__lp_add__', name: '', domain: '', color: 'none', initials: '+', tokens: [], _isAdd: true };
+  nodes.push(addNode);
+
+  const dpr = window.devicePixelRatio || 1;
+  const W = container.clientWidth || 800;
+  const H = container.clientHeight || 560;
+  const BASE_R = Math.max(20, Math.min(30, W / (nodes.length * 2)));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  container.appendChild(canvas);
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const particles = [];
+  links.forEach(l => {
+    const count = Math.max(1, Math.round(l.strength * 1.5));
+    for (let i = 0; i < count; i++) {
+      particles.push({ link: l, t: Math.random(), speed: 0.001 + Math.random() * 0.003, size: 1 + Math.random() * 1.5, opacity: 0.3 + Math.random() * 0.5 });
+    }
+  });
+
+  addNode.x = W / 2 + 160;
+  addNode.y = H / 2 - 100;
+
+  const sim = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(links).id(d => d.id).distance(d => Math.max(80, 280 - d.strength * 70)).strength(d => 0.08 + d.strength * 0.15))
+    .force('charge', d3.forceManyBody().strength(-600).distanceMax(800))
+    .force('center', d3.forceCenter(W / 2, H / 2).strength(0.03))
+    .force('collision', d3.forceCollide().radius(d => d._isAdd ? ADD_R + 15 : BASE_R + 20))
+    .force('x', d3.forceX(W / 2).strength(0.02))
+    .force('y', d3.forceY(H / 2).strength(0.02))
+    .alphaDecay(0.015);
+  _lpGraphSim = sim;
+
+  let hoveredNode = null;
+  let mousePos = null;
+  canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    mousePos = [mx, my];
+    hoveredNode = null;
+    for (const n of nodes) {
+      let hr = n._isAdd ? ADD_R + 5 : BASE_R + 5;
+      if (Math.hypot(n.x - mx, n.y - my) < hr) { hoveredNode = n; break; }
+    }
+    canvas.style.cursor = hoveredNode ? 'pointer' : 'default';
+  });
+  canvas.addEventListener('mouseleave', () => { hoveredNode = null; mousePos = null; });
+
+  function draw() {
+    const now = performance.now();
+    ctx.save();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, W, H);
+
+    const q = _lpHighlightQuery;
+    const matchIds = new Set();
+    if (q) {
+      nodes.forEach(n => {
+        if (n.name.toLowerCase().includes(q) || n.domain.toLowerCase().includes(q)) matchIds.add(n.id);
+      });
+    }
+    const filtering = matchIds.size > 0;
+
+    for (const l of links) {
+      const s = l.source, t = l.target;
+      const dimmed = filtering && !matchIds.has(s.id) && !matchIds.has(t.id);
+      const alpha = dimmed ? 0.04 : (0.12 + l.strength * 0.08);
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(t.x, t.y);
+      ctx.strokeStyle = `rgba(160,170,190,${alpha})`;
+      ctx.lineWidth = 0.6 + l.strength * 0.4;
+      ctx.stroke();
+    }
+
+    for (const p of particles) {
+      p.t += p.speed;
+      if (p.t > 1) p.t -= 1;
+      const s = p.link.source, t = p.link.target;
+      const dimmed = filtering && !matchIds.has(s.id) && !matchIds.has(t.id);
+      if (dimmed) continue;
+      const px = s.x + (t.x - s.x) * p.t;
+      const py = s.y + (t.y - s.y) * p.t;
+      ctx.beginPath();
+      ctx.arc(px, py, p.size, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(130,150,200,${p.opacity * 0.45})`;
+      ctx.fill();
+    }
+
+    if (hoveredNode !== addNode) {
+      let cx = 0, cy = 0, cnt = 0;
+      for (const n of nodes) { if (!n._isAdd) { cx += n.x; cy += n.y; cnt++; } }
+      if (cnt) {
+        cx /= cnt; cy /= cnt;
+        let maxD = 0;
+        for (const n of nodes) { if (!n._isAdd) { const d = Math.hypot(n.x - cx, n.y - cy); if (d > maxD) maxD = d; } }
+        const a = now * 0.00015;
+        addNode.x = cx + Math.cos(a) * (maxD + BASE_R * 3.5);
+        addNode.y = cy + Math.sin(a) * (maxD + BASE_R * 3.5);
+      }
+    }
+
+    if (_lpDiscoverNode && !nodes.find(n => n.id === _lpDiscoverNode.id)) {
+      const dn = _lpDiscoverNode;
+      dn.x = addNode.x;
+      dn.y = addNode.y;
+      nodes.push(dn);
+      const nearestNonAdd = nodes.filter(n => !n._isAdd && n.id !== dn.id);
+      const connected = nearestNonAdd.filter(n => dn.tokens.some(t => n.tokens && n.tokens.some(u => t === u || t.includes(u) || u.includes(t))));
+      (connected.length ? connected : nearestNonAdd.slice(0, 2)).forEach(n => {
+        const l = { source: dn, target: n, strength: 1 };
+        links.push(l);
+        particles.push({ link: l, t: Math.random(), speed: 0.002 + Math.random() * 0.003, size: 1.5, opacity: 0.5 });
+      });
+      sim.nodes(nodes);
+      sim.force('link').links(links);
+      sim.alpha(0.5).restart();
+    }
+
+    for (const n of nodes) {
+      if (n._isAdd) {
+        const hov = hoveredNode === n;
+        const busy = _lpDiscoverActive;
+        const pulse = 1 + Math.sin(now * 0.003) * 0.08;
+        const ar = ADD_R * pulse;
+        const glow = ctx.createRadialGradient(n.x, n.y, ar * 0.3, n.x, n.y, ar * 2.5);
+        glow.addColorStop(0, `rgba(100,130,200,${hov ? 0.12 : 0.04})`);
+        glow.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.beginPath(); ctx.arc(n.x, n.y, ar * 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = glow; ctx.fill();
+
+        ctx.beginPath(); ctx.arc(n.x, n.y, ar, 0, Math.PI * 2);
+        ctx.fillStyle = busy ? 'rgba(90,120,180,0.15)' : 'rgba(140,160,200,0.08)';
+        ctx.fill();
+        ctx.setLineDash([3, 3]);
+        ctx.strokeStyle = `rgba(100,130,180,${busy || hov ? 0.6 : 0.25})`;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = `rgba(80,110,170,${busy || hov ? 0.8 : 0.45})`;
+        ctx.font = `300 ${ar * 1.1}px Inter, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(busy ? '…' : '+', n.x, n.y + 1);
+
+        if (!busy) {
+          ctx.fillStyle = `rgba(80,110,170,${hov ? 0.6 : 0.3})`;
+          ctx.font = '500 9px Inter, sans-serif';
+          ctx.fillText('Discover', n.x, n.y + ar + 13);
+        } else {
+          ctx.fillStyle = 'rgba(80,110,170,0.4)';
+          ctx.font = '500 9px Inter, sans-serif';
+          const dots = '.'.repeat(Math.floor(now / 500) % 4);
+          ctx.fillText('Discovering' + dots, n.x, n.y + ar + 13);
+        }
+        continue;
+      }
+
+      const dimmed = filtering && !matchIds.has(n.id);
+      const hovered = hoveredNode === n;
+      const highlighted = filtering && matchIds.has(n.id);
+
+      let r = BASE_R;
+      if (mousePos) {
+        const dx = n.x - mousePos[0], dy = n.y - mousePos[1];
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const focusRadius = 250;
+        if (dist < focusRadius) {
+          const t = 1 - dist / focusRadius;
+          r = BASE_R * (1 + t * 0.7);
+        } else {
+          r = BASE_R * 0.75;
+        }
+      }
+      if (hovered) r = Math.max(r, BASE_R * 1.6);
+      const pulse = 1 + Math.sin(now * 0.002 + n.name.length) * 0.04;
+      const rr = r * pulse;
+      const [cr, cg, cb] = _hexToRgb(n.color);
+      const nodeAlpha = dimmed ? 0.12 : 1;
+
+      if (!dimmed) {
+        const glowR = rr * 2.5;
+        const grad = ctx.createRadialGradient(n.x, n.y, rr * 0.5, n.x, n.y, glowR);
+        grad.addColorStop(0, `rgba(${cr},${cg},${cb},${hovered ? 0.15 : 0.05})`);
+        grad.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.beginPath(); ctx.arc(n.x, n.y, glowR, 0, Math.PI * 2);
+        ctx.fillStyle = grad; ctx.fill();
+      }
+
+      if (n._newAt) {
+        const age = (now - n._newAt) / 1000;
+        if (age < 12) {
+          const fade = Math.max(0, 1 - age / 12);
+          const ring = 1 + Math.sin(now * 0.004) * 0.5;
+          const outerR = rr + 12 + ring * 10;
+          const glowG = ctx.createRadialGradient(n.x, n.y, rr * 0.5, n.x, n.y, outerR);
+          glowG.addColorStop(0, `rgba(34,197,94,${fade * 0.25})`);
+          glowG.addColorStop(0.6, `rgba(34,197,94,${fade * 0.08})`);
+          glowG.addColorStop(1, 'rgba(34,197,94,0)');
+          ctx.beginPath(); ctx.arc(n.x, n.y, outerR, 0, Math.PI * 2);
+          ctx.fillStyle = glowG; ctx.fill();
+          ctx.beginPath(); ctx.arc(n.x, n.y, rr + 4 + ring * 3, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(34,197,94,${fade * 0.8})`;
+          ctx.lineWidth = 2.5; ctx.stroke();
+          const badgeY = n.y - rr - 16;
+          ctx.beginPath(); ctx.roundRect(n.x - 16, badgeY - 8, 32, 16, 8);
+          ctx.fillStyle = `rgba(34,197,94,${fade * 0.9})`; ctx.fill();
+          ctx.fillStyle = `rgba(255,255,255,${fade * 0.95})`;
+          ctx.font = '700 9px Inter, sans-serif';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText('NEW', n.x, badgeY);
+        } else {
+          delete n._newAt;
+        }
+      }
+
+      if (highlighted || hovered) {
+        ctx.beginPath(); ctx.arc(n.x, n.y, rr + 3, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(${cr},${cg},${cb},${hovered ? 0.5 : 0.3})`;
+        ctx.lineWidth = 2; ctx.stroke();
+      }
+
+      ctx.beginPath(); ctx.arc(n.x, n.y, rr, 0, Math.PI * 2);
+      ctx.fillStyle = dimmed ? `rgba(${cr},${cg},${cb},${nodeAlpha})` : n.color;
+      ctx.fill();
+      ctx.strokeStyle = dimmed ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.25)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      if (!dimmed) {
+        ctx.fillStyle = 'rgba(255,255,255,0.95)';
+        ctx.font = `700 ${rr * 0.6}px Inter, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(n.initials, n.x, n.y);
+
+        ctx.fillStyle = `rgba(30,35,50,${hovered ? 0.9 : 0.7})`;
+        ctx.font = `600 ${hovered ? 12 : 11}px 'Libre Baskerville', Georgia, serif`;
+        ctx.fillText(n.name, n.x, n.y + rr + 14);
+
+        ctx.fillStyle = 'rgba(100,110,130,0.6)';
+        ctx.font = '400 9px Inter, sans-serif';
+        ctx.fillText(n.domain, n.x, n.y + rr + 27);
+      }
+    }
+
+    ctx.restore();
+    _lpGraphAnim = requestAnimationFrame(draw);
+  }
+
+  sim.on('tick', () => {});
+  _lpGraphAnim = requestAnimationFrame(draw);
+}
+
+function _startLandingChatDemo(scenes) {
+  if (_landingChatTimer) { clearTimeout(_landingChatTimer); _landingChatTimer = null; }
+
+  const bodyEl = document.getElementById('lp-chat-body');
+  const chipsEl = document.getElementById('lp-selected-chips');
+  const inputEl = document.getElementById('lp-composer-input');
+  const startersEl = document.getElementById('lp-starters');
+  if (!bodyEl) return;
+
+  let sceneIdx = 0;
+
+  function _animateIn(el) {
+    el.style.opacity = '0';
+    el.style.transform = 'translateY(8px)';
+    requestAnimationFrame(() => {
+      el.style.transition = 'opacity 0.3s, transform 0.3s';
+      el.style.opacity = '1';
+      el.style.transform = 'translateY(0)';
+    });
+  }
+
+  function _typeText(container, el, text, cb) {
+    let i = 0;
+    function tick() {
+      if (i < text.length) {
+        el.textContent += text.slice(i, i + 2);
+        i += 2;
+        container.scrollTop = container.scrollHeight;
+        _landingChatTimer = setTimeout(tick, 18);
+      } else {
+        if (cb) _landingChatTimer = setTimeout(cb, 1000);
+      }
+    }
+    _landingChatTimer = setTimeout(tick, 250);
+  }
+
+  function _typeInput(text, cb) {
+    if (!inputEl) { if (cb) cb(); return; }
+    inputEl.value = '';
+    let i = 0;
+    function tick() {
+      if (i < text.length) {
+        i++;
+        inputEl.value = text.slice(0, i);
+        _landingChatTimer = setTimeout(tick, 40 + Math.random() * 30);
+      } else {
+        _landingChatTimer = setTimeout(() => {
+          inputEl.value = '';
+          if (cb) cb();
+        }, 400);
+      }
+    }
+    _landingChatTimer = setTimeout(tick, 300);
+  }
+
+  function _mindAvatar(name, color) {
+    const ini = name.split(/\s+/).slice(0, 2).map(w => w[0]).join('');
+    return `<span class="lp-mn-avatar" style="background:${color}">${ini}</span>`;
+  }
+
+  function playScene() {
+    const scene = scenes[sceneIdx % scenes.length];
+    sceneIdx++;
+
+    bodyEl.innerHTML = '';
+
+    if (chipsEl) {
+      chipsEl.innerHTML = scene.bookChip
+        ? `<div class="book-chip"><span>${esc(scene.bookChip)}</span></div>`
+        : '';
+    }
+    if (startersEl) startersEl.style.display = 'none';
+
+    let msgIdx = 0;
+
+    function showNext() {
+      if (msgIdx >= scene.messages.length) {
+        _landingChatTimer = setTimeout(() => {
+          bodyEl.style.opacity = '0';
+          setTimeout(() => {
+            bodyEl.style.opacity = '1';
+            if (chipsEl) chipsEl.innerHTML = '';
+            if (startersEl) startersEl.style.display = '';
+            playScene();
+          }, 400);
+        }, 3500);
+        return;
+      }
+
+      const msg = scene.messages[msgIdx];
+      msgIdx++;
+
+      if (msg.role === 'user') {
+        _typeInput(msg.text, () => {
+          const div = document.createElement('div');
+          div.className = 'lp-msg lp-msg-user';
+          div.textContent = msg.text;
+          _animateIn(div);
+          bodyEl.appendChild(div);
+          bodyEl.scrollTop = bodyEl.scrollHeight;
+          _landingChatTimer = setTimeout(showNext, 800);
+        });
+
+      } else if (msg.role === 'assistant') {
+        const div = document.createElement('div');
+        div.className = 'lp-msg lp-msg-assistant';
+        const textSpan = document.createElement('span');
+        div.appendChild(textSpan);
+        _animateIn(div);
+        bodyEl.appendChild(div);
+        _typeText(bodyEl, textSpan, msg.text, () => {
+          if (msg.sources) {
+            const srcEl = document.createElement('div');
+            srcEl.className = 'lp-msg-sources';
+            srcEl.innerHTML = msg.sources.map(s => `<span class="lp-source-tag">${esc(s)}</span>`).join('');
+            _animateIn(srcEl);
+            div.appendChild(srcEl);
+            bodyEl.scrollTop = bodyEl.scrollHeight;
+          }
+          _landingChatTimer = setTimeout(showNext, 1000);
+        });
+
+      } else if (msg.role === 'loading') {
+        const div = document.createElement('div');
+        div.className = 'lp-system-notice';
+        div.innerHTML = `<span class="loading-dot">${esc(msg.text)}</span>`;
+        _animateIn(div);
+        bodyEl.appendChild(div);
+        bodyEl.scrollTop = bodyEl.scrollHeight;
+        _landingChatTimer = setTimeout(() => {
+          div.remove();
+          showNext();
+        }, 1500);
+
+      } else if (msg.role === 'join') {
+        const div = document.createElement('div');
+        div.className = 'lp-system-notice';
+        const colors = { 'Richard Feynman': '#e76f51', 'Charlie Munger': '#9b2226', 'Paul Graham': '#588157', 'Elon Musk': '#0077b6', 'Albert Einstein': '#457b9d', 'Socrates': '#264653' };
+        const avatars = msg.names.map(n => _mindAvatar(n, colors[n] || '#6d597a')).join('');
+        const label = msg.names.length === 1 ? msg.names[0] : msg.names.slice(0, -1).join(', ') + ' and ' + msg.names[msg.names.length - 1];
+        div.innerHTML = `<div class="lp-join-inner">${avatars}<span>${esc(label)} joined the discussion</span></div>`;
+        _animateIn(div);
+        bodyEl.appendChild(div);
+        bodyEl.scrollTop = bodyEl.scrollHeight;
+        _landingChatTimer = setTimeout(showNext, 800);
+
+      } else if (msg.role === 'mind') {
+        const div = document.createElement('div');
+        div.className = 'lp-msg lp-msg-mind';
+        div.innerHTML = `<div class="lp-mind-header">${_mindAvatar(msg.name, msg.color)}<span class="lp-mn-name">${esc(msg.name)}</span></div><div class="lp-mind-body"></div>`;
+        _animateIn(div);
+        bodyEl.appendChild(div);
+        const bodyDiv = div.querySelector('.lp-mind-body');
+        _typeText(bodyEl, bodyDiv, msg.text, () => {
+          _landingChatTimer = setTimeout(showNext, 1000);
+        });
+      }
+    }
+
+    _landingChatTimer = setTimeout(showNext, 1200);
+  }
+
+  playScene();
 }
 
 function navigate() {
@@ -67,8 +950,19 @@ function navigate() {
   const el = document.getElementById('page-' + route.page);
   if (el) el.classList.remove('hidden');
 
+  const appLayout = document.getElementById('app-layout');
+  if (route.page === 'landing') {
+    appLayout.classList.add('landing-active');
+  } else {
+    appLayout.classList.remove('landing-active');
+  }
+
   switch (route.page) {
+    case 'landing':
+      renderLandingPage();
+      break;
     case 'home':
+      _stopLandingAnimations();
       renderHome();
       renderSelectedChips();
       break;
@@ -76,6 +970,8 @@ function navigate() {
     case 'chats': renderChatsPage(); break;
     case 'library': renderLibrary(); break;
     case 'minds': renderMindsPage(); break;
+    case 'login': renderLoginPage(); break;
+    case 'subscription': renderSubscriptionPage(); break;
     case 'mind':
       currentMindId = route.id;
       renderMindDetail(route.id);
@@ -95,9 +991,20 @@ function toggleSidebar() {
 
 // ─── API ───
 async function api(path, opts = {}) {
+  if (authToken) {
+    opts.headers = { ...(opts.headers || {}), 'Authorization': 'Bearer ' + authToken };
+  }
   const r = await fetch(path, opts);
   const d = await r.json();
-  if (!r.ok) throw new Error(d.detail || 'Request failed');
+  if (r.status === 429 && d.detail?.code === 'quota_exceeded') {
+    showUpgradeModal(d.detail);
+    throw new Error(d.detail.message || 'Quota exceeded');
+  }
+  if (r.status === 401 && d.code === 'auth_required' && window.FEYNMAN_PRO) {
+    window.location.hash = '#/login';
+    throw new Error('Please sign in to continue');
+  }
+  if (!r.ok) throw new Error(d.detail || (typeof d.detail === 'object' ? d.detail.message : '') || 'Request failed');
   return d;
 }
 
@@ -2468,10 +3375,13 @@ function showCreateMindDialog() {
 
 // ─── Init ───
 async function init() {
+  await loadProConfig();
+  if (window.FEYNMAN_PRO) await initSupabase();
   await Promise.all([loadAgents(), loadVotes(), loadTopics(), loadMinds()]);
   buildBookList();
   restoreSessions();
   renderChatHistory();
+  updateAuthUI();
 
   document.getElementById('app-layout').classList.add('sidebar-collapsed');
 
