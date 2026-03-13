@@ -515,23 +515,41 @@ def debug_token(request: Request) -> dict[str, Any]:
     import jwt as _jwt
     auth = request.headers.get("authorization", "")
     if not auth.startswith("Bearer "):
-        return {"error": "no token"}
+        return {"error": "no token", "hint": "Authorization header missing or not Bearer"}
     token = auth[7:]
+    secret = os.getenv("SUPABASE_JWT_SECRET", "")
+    secret_stripped = secret.strip()
+    result: dict[str, Any] = {
+        "secret_len_raw": len(secret),
+        "secret_len_stripped": len(secret_stripped),
+        "secret_first8": secret_stripped[:8],
+        "secret_last4": secret_stripped[-4:] if secret_stripped else "",
+        "secret_has_newline": "\n" in secret,
+    }
     try:
         header = _jwt.get_unverified_header(token)
         claims = _jwt.decode(token, options={"verify_signature": False})
-        secret = os.getenv("SUPABASE_JWT_SECRET", "")
-        return {
-            "header": header,
-            "claims": {k: v for k, v in claims.items() if k != "sub"},
-            "secret_len": len(secret),
-            "secret_stripped_len": len(secret.strip()),
-            "secret_first4": secret.strip()[:4],
-            "has_aud": "aud" in claims,
-            "aud_value": claims.get("aud"),
-        }
+        result["header"] = header
+        result["claims_keys"] = list(claims.keys())
+        result["aud"] = claims.get("aud")
+        result["iss"] = claims.get("iss")
+        result["role"] = claims.get("role")
+        result["exp"] = claims.get("exp")
+        result["email"] = claims.get("email")
     except Exception as e:
-        return {"error": str(e)}
+        result["decode_error"] = str(e)
+        return result
+    try:
+        _jwt.decode(token, secret_stripped, algorithms=["HS256"], audience="authenticated")
+        result["verify_result"] = "OK"
+    except Exception as e:
+        result["verify_result"] = f"FAILED: {e}"
+        try:
+            _jwt.decode(token, secret_stripped, algorithms=["HS256"], options={"verify_aud": False})
+            result["verify_no_aud"] = "OK (signature valid, audience mismatch)"
+        except Exception as e2:
+            result["verify_no_aud"] = f"FAILED: {e2}"
+    return result
 
 
 # ─── Agent endpoints ───
