@@ -1403,11 +1403,24 @@ async function api(path, opts = {}) {
   if (authToken) {
     opts.headers = { ...(opts.headers || {}), 'Authorization': 'Bearer ' + authToken };
   }
-  const r = await fetch(path, opts);
-  const d = await r.json();
+  let r = await fetch(path, opts);
+  let d = await r.json();
   if (r.status === 429 && d.detail?.code === 'quota_exceeded') {
     showUpgradeModal(d.detail);
     throw new Error(d.detail.message || 'Quota exceeded');
+  }
+  // Token expired or invalid — try refreshing the session before giving up
+  if (r.status === 401 && (d.code === 'token_expired' || d.code === 'invalid_token') && supabaseClient) {
+    try {
+      const { data: { session } } = await supabaseClient.auth.refreshSession();
+      if (session) {
+        authToken = session.access_token;
+        currentUser = session.user;
+        opts.headers = { ...(opts.headers || {}), 'Authorization': 'Bearer ' + authToken };
+        r = await fetch(path, opts);
+        d = await r.json();
+      }
+    } catch {}
   }
   if (r.status === 401 && d.code === 'auth_required' && window.FEYNMAN_PRO) {
     window.location.hash = '#/login';
