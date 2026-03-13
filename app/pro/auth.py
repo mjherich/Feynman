@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import os
 import logging
+import time
 
 import jwt
+import httpx
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -13,12 +15,17 @@ from ..core.db import get_or_create_user
 log = logging.getLogger(__name__)
 
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "").strip()
-JWT_ALGORITHMS = ["HS256"]
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
+
+_JWKS_CACHE: list | None = None
+_JWKS_CACHE_TIME: float = 0
+_JWKS_TTL = 600
 
 PUBLIC_PATHS = {
     "/", "/api/health",
     "/api/pro/config",
     "/api/pro/webhook",
+    "/api/pro/debug-token",
     "/api/topics",
     "/api/agents",
     "/api/votes",
@@ -26,6 +33,53 @@ PUBLIC_PATHS = {
     "/favicon.ico",
 }
 PUBLIC_PREFIXES = ("/static/",)
+
+
+def _get_jwks_keys() -> list:
+    """Fetch and cache JWKS keys from Supabase."""
+    global _JWKS_CACHE, _JWKS_CACHE_TIME
+    now = time.monotonic()
+    if _JWKS_CACHE is not None and (now - _JWKS_CACHE_TIME) < _JWKS_TTL:
+        return _JWKS_CACHE
+    if not SUPABASE_URL:
+        return _JWKS_CACHE or []
+    jwks_url = f"{SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json"
+    try:
+        resp = httpx.get(jwks_url, timeout=5)
+        resp.raise_for_status()
+        keys = resp.json().get("keys", [])
+        _JWKS_CACHE = [jwt.PyJWK(k) for k in keys]
+        _JWKS_CACHE_TIME = now
+        log.info("Fetched %d JWKS keys from %s", len(_JWKS_CACHE), jwks_url)
+    except Exception as e:
+        log.warning("JWKS fetch failed: %s", e)
+    return _JWKS_CACHE or []
+
+
+def _decode_token(token: str) -> dict:
+    """Decode a Supabase JWT. Supports HS256 (legacy) and ES256 (JWKS)."""
+    header = jwt.get_unverified_header(token)
+    alg = header.get("alg", "")
+
+    if alg == "HS256":
+        return jwt.decode(
+            token, SUPABASE_JWT_SECRET,
+            algorithms=["HS256"],
+            audience="authenticated",
+        )
+
+    if alg == "ES256":
+        kid = header.get("kid", "")
+        for jwk in _get_jwks_keys():
+            if jwk.key_id == kid:
+                return jwt.decode(
+                    token, jwk.key,
+                    algorithms=["ES256"],
+                    audience="authenticated",
+                )
+        raise jwt.InvalidTokenError(f"No JWKS key found for kid={kid}")
+
+    raise jwt.InvalidTokenError(f"Unsupported algorithm: {alg}")
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -50,11 +104,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         token = auth_header[7:]
         try:
-            payload = jwt.decode(
-                token, SUPABASE_JWT_SECRET,
-                algorithms=JWT_ALGORITHMS,
-                audience="authenticated",
-            )
+            payload = _decode_token(token)
         except jwt.ExpiredSignatureError:
             if is_get_api:
                 return await call_next(request)
