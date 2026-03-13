@@ -297,36 +297,34 @@ function renderSubscriptionPage() {
     try { sub = await api('/api/pro/subscription'); } catch {}
     const isPro = sub.tier === 'pro';
     const freeFeatures = [
-      { label: 'Chat messages', value: '15 / day' },
-      { label: 'Mind conversations', value: '5 / day' },
-      { label: 'Topic & book discovery', value: '3 / day' },
-      { label: 'Invite new minds to the network', value: '2 / day' },
-      { label: 'Upload books (PDF / TXT)', value: '2 / day' },
-      { label: 'Create mind from any source', value: '1 / day' },
+      'Chat with any book in your library',
+      'Four-layer answers: text, metadata, web, LLM',
+      'Talk with great minds',
+      'Discover topics and books',
+      'Upload your own books (PDF / TXT)',
+      'Limited daily usage',
     ];
     const proFeatures = [
-      { label: 'Chat messages', value: '200 / day' },
-      { label: 'Mind conversations', value: '100 / day' },
-      { label: 'Topic & book discovery', value: '50 / day' },
-      { label: 'Invite new minds to the network', value: '30 / day' },
-      { label: 'Upload books (PDF / TXT)', value: '30 / day' },
-      { label: 'Create mind from any source', value: '30 / day' },
+      'Everything in Free',
+      'Much higher daily limits',
+      'Create minds from any source',
+      'Expand the great minds network',
+      'Priority access',
     ];
-    const featureRow = (f, isPro) => `<div class="sub-feature-row"><span class="sub-feature-label">${esc(f.label)}</span><span class="sub-feature-value ${isPro ? 'pro-value' : ''}">${esc(f.value)}</span></div>`;
+    const featureRow = (text, isPro) => `<div class="sub-feature-row"><span class="sub-feature-check ${isPro ? 'pro-check' : ''}">\u2713</span><span class="sub-feature-label">${esc(text)}</span></div>`;
     el.innerHTML = `<div class="sub-page">
       <div class="sub-header">
-        <h1 class="sub-title">Subscription</h1>
-        <p class="sub-subtitle">Daily limits reset every 24 hours. All features are available on both plans.</p>
+        <h1 class="sub-title">Plans</h1>
+        <p class="sub-subtitle">All features are available on both plans. Pro unlocks higher usage limits.</p>
       </div>
       <div class="sub-cards">
         <div class="sub-card ${!isPro ? 'sub-card-active' : ''}">
           <div class="sub-card-head">
             <div class="sub-plan-name"><span>Free</span>${!isPro ? '<span class="sub-badge">Current</span>' : ''}</div>
             <div class="sub-price">$0<span>/mo</span></div>
-            <p class="sub-price-note">All core features, daily limits</p>
+            <p class="sub-price-note">Get started, no credit card needed</p>
           </div>
           <div class="sub-card-body">
-            <div class="sub-features-title">Daily limits</div>
             ${freeFeatures.map(f => featureRow(f, false)).join('')}
           </div>
           ${!isPro ? '<div class="sub-card-foot"><button class="sub-btn sub-btn-secondary" disabled>Current Plan</button></div>' : ''}
@@ -335,39 +333,15 @@ function renderSubscriptionPage() {
           <div class="sub-card-head">
             <div class="sub-plan-name"><span>Pro</span>${isPro ? '<span class="sub-badge sub-badge-pro">Current</span>' : ''}</div>
             <div class="sub-price">$9.90<span>/mo</span></div>
-            <p class="sub-price-note">10x the daily limits</p>
+            <p class="sub-price-note">For power users who read every day</p>
           </div>
           <div class="sub-card-body">
-            <div class="sub-features-title">Daily limits</div>
             ${proFeatures.map(f => featureRow(f, true)).join('')}
           </div>
           <div class="sub-card-foot">
             ${isPro
               ? `<button class="sub-btn sub-btn-manage" id="sub-manage-btn">Manage Subscription</button>${sub.subscription?.cancel_at_period_end ? '<p class="sub-cancel-note">Cancels at end of billing period</p>' : ''}`
               : '<button class="sub-btn sub-btn-primary" id="sub-upgrade-btn">Upgrade to Pro</button>'}
-          </div>
-        </div>
-      </div>
-      <div class="sub-explainer">
-        <div class="sub-explainer-title">What every limit covers</div>
-        <div class="sub-explainer-grid">
-          <div class="sub-explainer-item">
-            <div class="sub-explainer-text"><strong>Chat messages</strong> — Ask questions about any book. A four-layer content system answers from the book's text, metadata, web search, and LLM knowledge. Cross-book search included.</div>
-          </div>
-          <div class="sub-explainer-item">
-            <div class="sub-explainer-text"><strong>Mind conversations</strong> — Talk with great minds directly or have them join your book chats. Each message to or from a mind counts as one.</div>
-          </div>
-          <div class="sub-explainer-item">
-            <div class="sub-explainer-text"><strong>Topic & book discovery</strong> — Start from a topic to discover relevant books, or search for a specific book. Found books are auto-indexed and added to your library.</div>
-          </div>
-          <div class="sub-explainer-item">
-            <div class="sub-explainer-text"><strong>Invite new minds</strong> — Generate a new great mind by name, or discover nearby minds through the knowledge graph. Each generation uses an LLM call.</div>
-          </div>
-          <div class="sub-explainer-item">
-            <div class="sub-explainer-text"><strong>Upload books</strong> — Bring your own PDFs or text files. Each upload is indexed for instant chat.</div>
-          </div>
-          <div class="sub-explainer-item">
-            <div class="sub-explainer-text"><strong>Create mind from source</strong> — Build a mind agent from a Twitter profile, blog URL, or pasted text. Upload yourself or anyone whose thinking you want in the network.</div>
           </div>
         </div>
       </div>
