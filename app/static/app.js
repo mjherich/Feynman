@@ -335,7 +335,7 @@ function renderSubscriptionPage() {
     el.innerHTML = `<div class="sub-page">
       <div class="sub-header">
         <h1 class="sub-title">Plans</h1>
-        <p class="sub-subtitle">All features are available on both plans. Pro unlocks higher usage limits.</p>
+        <p class="sub-subtitle">Read smarter. Think deeper. Learn from the greatest minds in history.</p>
       </div>
       <div class="sub-cards">
         <div class="sub-card ${!isPro ? 'sub-card-active' : ''}">
