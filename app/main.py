@@ -353,13 +353,11 @@ def _process_recommendations(text: str) -> None:
 
 # ─── Startup ───
 
-_SEED_BATCH_SIZE = int(os.getenv("SEED_BATCH_SIZE", "10"))
+_SEED_BATCH_SIZE = int(os.getenv("SEED_BATCH_SIZE", "5"))
 
 
 def _seed_minds_batch(batch_size: int = _SEED_BATCH_SIZE) -> int:
-    """Seed up to `batch_size` missing minds synchronously. Returns count seeded."""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
+    """Seed up to `batch_size` missing minds sequentially. Returns count seeded."""
     pending = []
     for seed in SEED_MINDS:
         if find_mind_by_name(seed["name"]):
@@ -373,21 +371,13 @@ def _seed_minds_batch(batch_size: int = _SEED_BATCH_SIZE) -> int:
 
     log.info("Seeding batch of %d minds…", len(pending))
     seeded = 0
-
-    def _gen(seed: dict) -> str:
-        get_or_create_mind(seed["name"], era=seed["era"], domain=seed["domain"])
-        return seed["name"]
-
-    with ThreadPoolExecutor(max_workers=min(len(pending), 3)) as pool:
-        futures = {pool.submit(_gen, s): s["name"] for s in pending}
-        for fut in as_completed(futures):
-            name = futures[fut]
-            try:
-                fut.result()
-                seeded += 1
-                log.info("Seeded mind: %s", name)
-            except Exception as exc:
-                log.warning("Failed to seed mind %s: %s", name, exc)
+    for seed in pending:
+        try:
+            get_or_create_mind(seed["name"], era=seed["era"], domain=seed["domain"])
+            seeded += 1
+            log.info("Seeded mind: %s", seed["name"])
+        except Exception as exc:
+            log.warning("Failed to seed mind %s: %s", seed["name"], exc)
 
     return seeded
 
@@ -533,13 +523,12 @@ def api_cron_discover(request: Request, background_tasks: BackgroundTasks) -> di
 
 @app.get("/api/cron/seed-minds")
 def api_cron_seed_minds(request: Request) -> dict[str, Any]:
-    """Cron-triggered mind seeding. Seeds all remaining minds (runs daily on Hobby)."""
+    """Cron-triggered mind seeding. Seeds a batch per run (Hobby has 60s timeout)."""
     _verify_cron(request)
     existing_count = len(list_minds())
     if existing_count >= len(SEED_MINDS):
         return {"status": "complete", "total": existing_count}
-    remaining = len(SEED_MINDS) - existing_count
-    seeded = _seed_minds_batch(remaining)
+    seeded = _seed_minds_batch(_SEED_BATCH_SIZE)
     return {"status": "ok", "seeded": seeded, "total": existing_count + seeded}
 
 
@@ -1077,13 +1066,15 @@ class PanelChatRequest(BaseModel):
     history: list[HistoryMessage] | None = None
 
 
+_LAZY_SEED_SIZE = int(os.getenv("LAZY_SEED_SIZE", "1"))
+
+
 @app.get("/api/minds")
 def api_list_minds() -> list[dict[str, Any]]:
     minds = list_minds()
-    # Lazy seeding: if not all seed minds exist yet, seed a small batch synchronously
-    # so the data is persisted before the serverless function exits
+    # Lazy seeding: seed 1 mind per request to stay within Vercel's 10s timeout
     if _IS_SERVERLESS and len(minds) < len(SEED_MINDS):
-        seeded = _seed_minds_batch(_SEED_BATCH_SIZE)
+        seeded = _seed_minds_batch(_LAZY_SEED_SIZE)
         if seeded:
             minds = list_minds()
     for m in minds:

@@ -175,33 +175,35 @@ window.signOut = signOut;
 
 function showUpgradeModal(detail) {
   const overlay = document.createElement('div');
-  overlay.className = 'mind-add-dialog';
-  const msg = detail?.message || 'You\'ve reached the free tier limit. Upgrade to Pro for unlimited access.';
+  overlay.className = 'upgrade-overlay';
+  const msg = detail?.message || 'Upgrade to Pro for unlimited access to all features.';
+  const features = [
+    'Great minds continuously join your chats',
+    'Create & discover minds from any source',
+    'Discover more books and topics',
+    'Higher daily usage limits',
+  ];
   overlay.innerHTML = `
-    <div class="mind-add-form" style="max-width:400px;text-align:center">
-      <h3 style="margin-bottom:12px">Upgrade to Pro</h3>
-      <p style="font-size:14px;color:var(--text-secondary);margin-bottom:20px;line-height:1.5">${esc(msg)}</p>
-      <div style="display:flex;gap:12px;justify-content:center">
-        <button class="onboarding-btn" id="upgrade-dismiss">Maybe Later</button>
-        <button class="primary-btn" id="upgrade-go" style="padding:10px 24px">Upgrade — $9.90/mo</button>
+    <div class="upgrade-card">
+      <button class="upgrade-close" id="upgrade-dismiss">&times;</button>
+      <div class="upgrade-icon">✦</div>
+      <h3 class="upgrade-title">Unlock Pro</h3>
+      <p class="upgrade-msg">${esc(msg)}</p>
+      <div class="upgrade-features">
+        ${features.map(f => `<div class="upgrade-feature"><span class="upgrade-check">✓</span>${esc(f)}</div>`).join('')}
       </div>
+      <button class="upgrade-cta" id="upgrade-go">See Plans & Upgrade</button>
+      <button class="upgrade-skip" id="upgrade-later">Maybe later</button>
     </div>`;
   document.body.appendChild(overlay);
-  overlay.querySelector('#upgrade-dismiss').addEventListener('click', () => overlay.remove());
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-  overlay.querySelector('#upgrade-go').addEventListener('click', async () => {
-    if (!proConfig?.stripe_enabled) {
-      alert('Payments are not configured on this server.');
-      overlay.remove();
-      return;
-    }
-    try {
-      const data = await api('/api/pro/create-checkout-session', { method: 'POST' });
-      if (data.url) window.location.href = data.url;
-    } catch (err) {
-      alert('Checkout failed: ' + err.message);
-    }
-    overlay.remove();
+  requestAnimationFrame(() => overlay.classList.add('visible'));
+  const close = () => { overlay.classList.remove('visible'); setTimeout(() => overlay.remove(), 200); };
+  overlay.querySelector('#upgrade-dismiss').addEventListener('click', close);
+  overlay.querySelector('#upgrade-later').addEventListener('click', close);
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  overlay.querySelector('#upgrade-go').addEventListener('click', () => {
+    close();
+    window.location.hash = '#/subscription';
   });
 }
 
