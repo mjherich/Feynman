@@ -741,22 +741,6 @@ function _renderLandingMindsGraph() {
     return force;
   }
 
-  const PAD = BASE_R + 45;
-  function makeBoundsForce() {
-    let ns;
-    function force() {
-      for (const n of ns) {
-        if (n._isAdd) continue;
-        if (n.x < PAD) { n.vx += (PAD - n.x) * 0.1; n.vx *= 0.8; }
-        if (n.x > W - PAD) { n.vx += (W - PAD - n.x) * 0.1; n.vx *= 0.8; }
-        if (n.y < PAD) { n.vy += (PAD - n.y) * 0.1; n.vy *= 0.8; }
-        if (n.y > H - PAD) { n.vy += (H - PAD - n.y) * 0.1; n.vy *= 0.8; }
-      }
-    }
-    force.initialize = function(n) { ns = n; };
-    return force;
-  }
-
   const graphCx = W * 0.55;
   const sim = d3.forceSimulation(nodes)
     .force('link', d3.forceLink(links).id(d => d.id).distance(d => Math.max(80, 280 - d.strength * 70)).strength(d => 0.08 + d.strength * 0.15))
@@ -766,7 +750,6 @@ function _renderLandingMindsGraph() {
     .force('x', d3.forceX(graphCx).strength(0.01))
     .force('y', d3.forceY(H / 2).strength(0.01))
     .force('avoid', makeAvoidForce())
-    .force('bounds', makeBoundsForce())
     .alphaDecay(0.03)
     .velocityDecay(0.35);
   _lpGraphSim = sim;
