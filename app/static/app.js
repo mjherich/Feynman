@@ -3848,6 +3848,12 @@ async function init() {
   await loadProConfig();
   if (window.FEYNMAN_PRO) await initSupabase();
   await loadUserTier();
+
+  // Show the correct page immediately based on URL hash,
+  // before async data loading, so refreshing #/minds or #/library
+  // doesn't flash the home page.
+  navigate();
+
   await Promise.all([loadAgents(), loadVotes(), loadTopics(), loadMinds()]);
   buildBookList();
   restoreSessions();
