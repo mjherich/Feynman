@@ -404,7 +404,8 @@ class SearchBookRequest(BaseModel):
 
 
 @app.post("/api/discover")
-def api_discover(payload: DiscoverRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
+def api_discover(payload: DiscoverRequest, request: Request, background_tasks: BackgroundTasks) -> dict[str, Any]:
+    _check_quota(request, "discover")
     try:
         books, usage = _discover_books_for_topic(payload.topic.strip(), count=payload.count)
     except ProviderError as exc:
@@ -416,12 +417,14 @@ def api_discover(payload: DiscoverRequest, background_tasks: BackgroundTasks) ->
         agent = get_agent(book["id"])
         if agent and agent["status"] == "catalog":
             background_tasks.add_task(_learn_agent, book["id"])
+    _track_usage(request, "discover")
     return {"topic": payload.topic.strip(), "books": books, "usage": usage}
 
 
 @app.post("/api/search-book")
-def api_search_book(payload: SearchBookRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
+def api_search_book(payload: SearchBookRequest, request: Request, background_tasks: BackgroundTasks) -> dict[str, Any]:
     """Search for a specific book by name. Uses LLM to identify the book and add it."""
+    _check_quota(request, "discover")
     query = payload.query.strip()
     # Check if already exists
     existing = find_agent_by_name(query)
@@ -510,7 +513,8 @@ def _run_index(agent_id: str, text: str) -> None:
 
 
 @app.post("/api/agents/upload")
-def api_create_upload_agent(background_tasks: BackgroundTasks, file: UploadFile = File(...)) -> dict[str, Any]:
+def api_create_upload_agent(request: Request, background_tasks: BackgroundTasks, file: UploadFile = File(...)) -> dict[str, Any]:
+    _check_quota(request, "upload")
     name = Path(file.filename).stem if file.filename else "Uploaded Book"
     agent_id = create_agent(name=name, agent_type="upload", source=file.filename, meta={})
     dest = config.UPLOAD_DIR / f"{agent_id}_{file.filename}"
@@ -544,13 +548,15 @@ def api_create_topic_agent(payload: TopicAgentRequest, background_tasks: Backgro
 
     agent_id = create_agent(name=topic, agent_type="topic", source="wikipedia", meta={"language": payload.language})
     background_tasks.add_task(_run_index, agent_id, text)
+    _track_usage(request, "upload")
     return {"id": agent_id, "status": "indexing"}
 
 
 # ─── Book-specific chat (skill-based) ───
 
 @app.post("/api/agents/{agent_id}/chat")
-def api_chat(agent_id: str, payload: ChatRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
+def api_chat(agent_id: str, payload: ChatRequest, request: Request, background_tasks: BackgroundTasks) -> dict[str, Any]:
+    _check_quota(request, "chat")
     agent = get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -629,13 +635,15 @@ def api_chat(agent_id: str, payload: ChatRequest, background_tasks: BackgroundTa
         resp["grounded"] = True
     else:
         resp["grounded"] = False
+    _track_usage(request, "chat", resp["usage"].get("total_tokens", 0))
     return resp
 
 
 # ─── Global cross-book chat (skill-based) ───
 
 @app.post("/api/chat")
-def api_global_chat(payload: GlobalChatRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
+def api_global_chat(payload: GlobalChatRequest, request: Request, background_tasks: BackgroundTasks) -> dict[str, Any]:
+    _check_quota(request, "chat")
     # Gather target agents
     target_agents: list[dict[str, Any]] = []
 
@@ -845,6 +853,7 @@ def api_global_chat(payload: GlobalChatRequest, background_tasks: BackgroundTask
     else:
         resp["grounded"] = False
 
+    _track_usage(request, "chat", resp["usage"].get("total_tokens", 0))
     return resp
 
 
@@ -965,7 +974,8 @@ def api_get_mind(mind_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/minds/generate")
-def api_generate_mind(payload: MindGenerateRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
+def api_generate_mind(payload: MindGenerateRequest, request: Request, background_tasks: BackgroundTasks) -> dict[str, Any]:
+    _check_quota(request, "generate_mind")
     try:
         mind = get_or_create_mind(payload.name.strip(), era=payload.era, domain=payload.domain)
     except ProviderError as exc:
@@ -979,13 +989,15 @@ def api_generate_mind(payload: MindGenerateRequest, background_tasks: Background
         if agent and agent["status"] == "catalog":
             background_tasks.add_task(_learn_agent, agent_id)
     safe = {k: v for k, v in mind.items() if k != "persona"}
+    _track_usage(request, "generate_mind")
     return safe
 
 
 @app.post("/api/minds/create-from-content")
 def api_create_mind_from_content(
-    payload: MindFromContentRequest, background_tasks: BackgroundTasks
+    payload: MindFromContentRequest, request: Request, background_tasks: BackgroundTasks
 ) -> dict[str, Any]:
+    _check_quota(request, "custom_minds")
     if not payload.source_url and not payload.content:
         raise HTTPException(status_code=400, detail="Provide source_url or content")
     try:
@@ -1004,11 +1016,13 @@ def api_create_mind_from_content(
         if agent and agent["status"] == "catalog":
             background_tasks.add_task(_learn_agent, agent_id)
     safe = {k: v for k, v in mind.items() if k != "persona"}
+    _track_usage(request, "custom_minds")
     return safe
 
 
 @app.post("/api/minds/suggest")
-def api_suggest_minds(payload: MindSuggestRequest) -> dict[str, Any]:
+def api_suggest_minds(payload: MindSuggestRequest, request: Request) -> dict[str, Any]:
+    _check_quota(request, "generate_mind")
     try:
         if payload.book_title:
             suggestions, usage = suggest_minds_for_book(
@@ -1037,7 +1051,8 @@ def api_suggest_minds(payload: MindSuggestRequest) -> dict[str, Any]:
 
 
 @app.post("/api/minds/{mind_id}/chat")
-def api_mind_chat(mind_id: str, payload: MindChatRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
+def api_mind_chat(mind_id: str, payload: MindChatRequest, request: Request, background_tasks: BackgroundTasks) -> dict[str, Any]:
+    _check_quota(request, "mind_chat")
     mind = get_mind(mind_id)
     if not mind:
         raise HTTPException(status_code=404, detail="Mind not found")
@@ -1070,11 +1085,13 @@ def api_mind_chat(mind_id: str, payload: MindChatRequest, background_tasks: Back
         extract_and_save_memory, mind["id"], payload.message, result["response"]
     )
 
+    _track_usage(request, "mind_chat")
     return result
 
 
 @app.post("/api/minds/panel-chat")
-def api_panel_chat(payload: PanelChatRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
+def api_panel_chat(payload: PanelChatRequest, request: Request, background_tasks: BackgroundTasks) -> dict[str, Any]:
+    _check_quota(request, "mind_chat")
     minds = []
     for mid in payload.mind_ids:
         m = get_mind(mid)
@@ -1126,4 +1143,5 @@ def api_panel_chat(payload: PanelChatRequest, background_tasks: BackgroundTasks)
         for k in total_usage:
             total_usage[k] += r.get("usage", {}).get(k, 0)
 
+    _track_usage(request, "mind_chat", total_usage.get("total_tokens", 0))
     return {"responses": results, "total_usage": total_usage}

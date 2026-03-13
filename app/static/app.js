@@ -150,7 +150,7 @@ function showUpgradeModal(detail) {
       <p style="font-size:14px;color:var(--text-secondary);margin-bottom:20px;line-height:1.5">${esc(msg)}</p>
       <div style="display:flex;gap:12px;justify-content:center">
         <button class="onboarding-btn" id="upgrade-dismiss">Maybe Later</button>
-        <button class="primary-btn" id="upgrade-go" style="padding:10px 24px">Upgrade — $10/mo</button>
+        <button class="primary-btn" id="upgrade-go" style="padding:10px 24px">Upgrade — $9.90/mo</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
@@ -296,14 +296,112 @@ function renderSubscriptionPage() {
     let sub = { tier: 'free', subscription: null };
     try { sub = await api('/api/pro/subscription'); } catch {}
     const isPro = sub.tier === 'pro';
-    const freeFeatures = [{ icon: '💬', label: 'Chat with Any Book', value: '10 / day' },{ icon: '🧠', label: 'Talk to Great Minds', value: '5 / day' },{ icon: '📚', label: 'Personal Library', value: '5 books' },{ icon: '📤', label: 'Upload Your Own Books', value: '3 / day' },{ icon: '🔍', label: 'AI Book Discovery', value: '3 / day' },{ icon: '✨', label: 'Summon Famous Minds', value: '1 / day' },{ icon: '🎭', label: 'Create Mind from Any Source', value: '1 mind' }];
-    const proFeatures = [{ icon: '💬', label: 'Chat with Any Book', value: '100 / day' },{ icon: '🧠', label: 'Talk to Great Minds', value: '50 / day' },{ icon: '📚', label: 'Personal Library', value: '50 books' },{ icon: '📤', label: 'Upload Your Own Books', value: '20 / day' },{ icon: '🔍', label: 'AI Book Discovery', value: '30 / day' },{ icon: '✨', label: 'Summon Famous Minds', value: '20 / day' },{ icon: '🎭', label: 'Create Mind from Any Source', value: '20 minds' }];
-    const featureRow = (f, isPro) => `<div class="sub-feature-row"><span class="sub-feature-icon">${f.icon}</span><span class="sub-feature-label">${esc(f.label)}</span><span class="sub-feature-value ${isPro ? 'pro-value' : ''}">${esc(f.value)}</span></div>`;
-    el.innerHTML = `<div class="sub-page"><div class="sub-header"><h1 class="sub-title">Subscription</h1><p class="sub-subtitle">Read smarter. Think deeper. Learn from the greatest minds in history.</p></div><div class="sub-cards"><div class="sub-card ${!isPro ? 'sub-card-active' : ''}"><div class="sub-card-head"><div class="sub-plan-name"><span>Free</span>${!isPro ? '<span class="sub-badge">Current</span>' : ''}</div><div class="sub-price">$0<span>/mo</span></div><p class="sub-price-note">Experience the core of Feynman</p></div><div class="sub-card-body"><div class="sub-features-title">What's included</div>${freeFeatures.map(f => featureRow(f, false)).join('')}</div>${!isPro ? '<div class="sub-card-foot"><button class="sub-btn sub-btn-secondary" disabled>Current Plan</button></div>' : ''}</div><div class="sub-card sub-card-pro ${isPro ? 'sub-card-active' : ''}"><div class="sub-card-head"><div class="sub-plan-name"><span>Pro</span>${isPro ? '<span class="sub-badge sub-badge-pro">Current</span>' : '<span class="sub-badge sub-badge-pro">Recommended</span>'}</div><div class="sub-price">$10<span>/mo</span></div><p class="sub-price-note">For serious readers and lifelong learners</p></div><div class="sub-card-body"><div class="sub-features-title">Everything in Free, plus</div>${proFeatures.map(f => featureRow(f, true)).join('')}</div><div class="sub-card-foot">${isPro ? `<button class="sub-btn sub-btn-manage" id="sub-manage-btn">Manage Subscription</button>${sub.subscription?.cancel_at_period_end ? '<p class="sub-cancel-note">Cancels at end of billing period</p>' : ''}` : '<button class="sub-btn sub-btn-primary" id="sub-upgrade-btn">Upgrade to Pro</button>'}</div></div></div><div class="sub-explainer"><div class="sub-explainer-title">What can you do with Feynman?</div><div class="sub-explainer-grid"><div class="sub-explainer-item"><div class="sub-explainer-icon">💬</div><div class="sub-explainer-text"><strong>Chat with Books</strong> — Ask questions, get insights, and have deep conversations with any book in your library</div></div><div class="sub-explainer-item"><div class="sub-explainer-icon">🧠</div><div class="sub-explainer-text"><strong>Talk to Great Minds</strong> — Have conversations with AI-powered personas of history's greatest thinkers</div></div><div class="sub-explainer-item"><div class="sub-explainer-icon">🔍</div><div class="sub-explainer-text"><strong>AI Book Discovery</strong> — Describe a topic and let AI find, index, and add relevant books to your library</div></div><div class="sub-explainer-item"><div class="sub-explainer-icon">✨</div><div class="sub-explainer-text"><strong>Summon Famous Minds</strong> — Generate AI personas of well-known thinkers, synthesized from their life's work</div></div><div class="sub-explainer-item"><div class="sub-explainer-icon">🎭</div><div class="sub-explainer-text"><strong>Create Custom Minds</strong> — Build a mind from any source — a Twitter profile, blog, or pasted text</div></div><div class="sub-explainer-item"><div class="sub-explainer-icon">📤</div><div class="sub-explainer-text"><strong>Upload Your Books</strong> — Bring your own PDFs and documents — AI indexes them for instant conversations</div></div></div></div><div class="sub-footer">${currentUser ? `<p class="sub-email">${esc(currentUser.email || '')}</p><button class="sub-signout-btn" onclick="signOut()">Sign Out</button>` : `<button class="sub-btn sub-btn-signin" onclick="window.location.hash='#/login'">Sign in to manage your account</button>`}</div></div>`;
+    const freeFeatures = [
+      { label: 'Chat messages', value: '20 / day' },
+      { label: 'Mind conversations', value: '10 / day' },
+      { label: 'Topic & book discovery', value: '5 / day' },
+      { label: 'Invite new minds to the network', value: '3 / day' },
+      { label: 'Upload books (PDF / TXT)', value: '3 / day' },
+      { label: 'Create mind from any source', value: '1 / day' },
+    ];
+    const proFeatures = [
+      { label: 'Chat messages', value: '200 / day' },
+      { label: 'Mind conversations', value: '100 / day' },
+      { label: 'Topic & book discovery', value: '50 / day' },
+      { label: 'Invite new minds to the network', value: '30 / day' },
+      { label: 'Upload books (PDF / TXT)', value: '30 / day' },
+      { label: 'Create mind from any source', value: '30 / day' },
+    ];
+    const featureRow = (f, isPro) => `<div class="sub-feature-row"><span class="sub-feature-label">${esc(f.label)}</span><span class="sub-feature-value ${isPro ? 'pro-value' : ''}">${esc(f.value)}</span></div>`;
+    el.innerHTML = `<div class="sub-page">
+      <div class="sub-header">
+        <h1 class="sub-title">Subscription</h1>
+        <p class="sub-subtitle">Daily limits reset every 24 hours. All features are available on both plans.</p>
+      </div>
+      <div class="sub-cards">
+        <div class="sub-card ${!isPro ? 'sub-card-active' : ''}">
+          <div class="sub-card-head">
+            <div class="sub-plan-name"><span>Free</span>${!isPro ? '<span class="sub-badge">Current</span>' : ''}</div>
+            <div class="sub-price">$0<span>/mo</span></div>
+            <p class="sub-price-note">All core features, daily limits</p>
+          </div>
+          <div class="sub-card-body">
+            <div class="sub-features-title">Daily limits</div>
+            ${freeFeatures.map(f => featureRow(f, false)).join('')}
+          </div>
+          ${!isPro ? '<div class="sub-card-foot"><button class="sub-btn sub-btn-secondary" disabled>Current Plan</button></div>' : ''}
+        </div>
+        <div class="sub-card sub-card-pro ${isPro ? 'sub-card-active' : ''}">
+          <div class="sub-card-head">
+            <div class="sub-plan-name"><span>Pro</span>${isPro ? '<span class="sub-badge sub-badge-pro">Current</span>' : ''}</div>
+            <div class="sub-price">$9.90<span>/mo</span></div>
+            <p class="sub-price-note">10x the daily limits</p>
+          </div>
+          <div class="sub-card-body">
+            <div class="sub-features-title">Daily limits</div>
+            ${proFeatures.map(f => featureRow(f, true)).join('')}
+          </div>
+          <div class="sub-card-foot">
+            ${isPro
+              ? `<button class="sub-btn sub-btn-manage" id="sub-manage-btn">Manage Subscription</button>${sub.subscription?.cancel_at_period_end ? '<p class="sub-cancel-note">Cancels at end of billing period</p>' : ''}`
+              : '<button class="sub-btn sub-btn-primary" id="sub-upgrade-btn">Upgrade to Pro</button>'}
+          </div>
+        </div>
+      </div>
+      <div class="sub-explainer">
+        <div class="sub-explainer-title">What every limit covers</div>
+        <div class="sub-explainer-grid">
+          <div class="sub-explainer-item">
+            <div class="sub-explainer-text"><strong>Chat messages</strong> — Ask questions about any book. A four-layer content system answers from the book's text, metadata, web search, and LLM knowledge. Cross-book search included.</div>
+          </div>
+          <div class="sub-explainer-item">
+            <div class="sub-explainer-text"><strong>Mind conversations</strong> — Talk with great minds directly or have them join your book chats. Each message to or from a mind counts as one.</div>
+          </div>
+          <div class="sub-explainer-item">
+            <div class="sub-explainer-text"><strong>Topic & book discovery</strong> — Start from a topic to discover relevant books, or search for a specific book. Found books are auto-indexed and added to your library.</div>
+          </div>
+          <div class="sub-explainer-item">
+            <div class="sub-explainer-text"><strong>Invite new minds</strong> — Generate a new great mind by name, or discover nearby minds through the knowledge graph. Each generation uses an LLM call.</div>
+          </div>
+          <div class="sub-explainer-item">
+            <div class="sub-explainer-text"><strong>Upload books</strong> — Bring your own PDFs or text files. Each upload is indexed for instant chat.</div>
+          </div>
+          <div class="sub-explainer-item">
+            <div class="sub-explainer-text"><strong>Create mind from source</strong> — Build a mind agent from a Twitter profile, blog URL, or pasted text. Upload yourself or anyone whose thinking you want in the network.</div>
+          </div>
+        </div>
+      </div>
+      <div class="sub-footer">
+        ${currentUser
+          ? `<p class="sub-email">${esc(currentUser.email || '')}</p><button class="sub-signout-btn" onclick="signOut()">Sign Out</button>`
+          : `<button class="sub-btn sub-btn-signin" onclick="window.location.hash='#/login'">Sign in to manage your account</button>`}
+      </div>
+    </div>`;
     const upgradeBtn = document.getElementById('sub-upgrade-btn');
-    if (upgradeBtn) { upgradeBtn.addEventListener('click', async () => { if (!currentUser) { window.location.hash = '#/login'; return; } upgradeBtn.textContent = 'Redirecting...'; upgradeBtn.disabled = true; try { const data = await api('/api/pro/create-checkout-session', { method: 'POST' }); if (data.url) window.location.href = data.url; } catch (err) { alert('Checkout failed: ' + err.message); upgradeBtn.textContent = 'Upgrade to Pro'; upgradeBtn.disabled = false; } }); }
+    if (upgradeBtn) {
+      upgradeBtn.addEventListener('click', async () => {
+        if (!currentUser) { window.location.hash = '#/login'; return; }
+        upgradeBtn.textContent = 'Redirecting...';
+        upgradeBtn.disabled = true;
+        try {
+          const data = await api('/api/pro/create-checkout-session', { method: 'POST' });
+          if (data.url) window.location.href = data.url;
+        } catch (err) {
+          alert('Checkout failed: ' + err.message);
+          upgradeBtn.textContent = 'Upgrade to Pro';
+          upgradeBtn.disabled = false;
+        }
+      });
+    }
     const manageBtn = document.getElementById('sub-manage-btn');
-    if (manageBtn) { manageBtn.addEventListener('click', async () => { try { const data = await api('/api/pro/create-portal-session', { method: 'POST' }); if (data.url) window.location.href = data.url; } catch (err) { alert('Portal failed: ' + err.message); } }); }
+    if (manageBtn) {
+      manageBtn.addEventListener('click', async () => {
+        try {
+          const data = await api('/api/pro/create-portal-session', { method: 'POST' });
+          if (data.url) window.location.href = data.url;
+        } catch (err) { alert('Portal failed: ' + err.message); }
+      });
+    }
   })();
 }
 
