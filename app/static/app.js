@@ -604,7 +604,7 @@ function renderLandingPage() {
                       <path d="M32,30 C26,24 38,18 32,12 C26,6 38,0 32,-4" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                   </div>
-                  <span class="greeting lp-greeting">${timeGreeting}</span>
+                  <span class="greeting lp-greeting">${timeGreeting}${userName ? ', ' + userName.split(' ')[0] : ''}</span>
                 </div>
                 <div class="chat-composer lp-composer">
                   <div class="selected-chips" id="lp-selected-chips"></div>
