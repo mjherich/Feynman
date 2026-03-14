@@ -138,7 +138,10 @@ The system auto-selects the best available provider and falls back through the c
 ## Logo
 
 <p align="center">
-  <img src="app/static/logo-final.svg" width="80" alt="Feynman logo" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="app/static/logo-final-dark.svg" />
+    <img src="app/static/logo-final.svg" width="80" alt="Feynman logo" />
+  </picture>
 </p>
 
 The design started from a simple insight: Richard Feynman invented Feynman diagrams — particle interaction diagrams where lines meet at vertices and wavy propagators carry forces between them. That visual language maps perfectly onto what this product does: minds meeting, exchanging knowledge, and leaving enriched.
@@ -146,11 +149,26 @@ The design started from a simple insight: Richard Feynman invented Feynman diagr
 We explored several directions built on this idea:
 
 <p align="center">
-  <img src="app/static/logo-concept-1-feynman-diagram.svg" width="56" alt="Classic diagram" />&nbsp;&nbsp;&nbsp;
-  <img src="app/static/logo-concept-2-book-diagram.svg" width="56" alt="Book diagram" />&nbsp;&nbsp;&nbsp;
-  <img src="app/static/logo-concept-5-vertex.svg" width="56" alt="Minimal vertex" />&nbsp;&nbsp;&nbsp;
-  <img src="app/static/logo-concept-8-elegant.svg" width="56" alt="Pure form" />&nbsp;&nbsp;&nbsp;
-  <img src="app/static/logo-final.svg" width="56" alt="Final logo" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="app/static/logo-concept-1-feynman-diagram-dark.svg" />
+    <img src="app/static/logo-concept-1-feynman-diagram.svg" width="56" alt="Classic diagram" />
+  </picture>&nbsp;&nbsp;&nbsp;
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="app/static/logo-concept-2-book-diagram-dark.svg" />
+    <img src="app/static/logo-concept-2-book-diagram.svg" width="56" alt="Book diagram" />
+  </picture>&nbsp;&nbsp;&nbsp;
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="app/static/logo-concept-5-vertex-dark.svg" />
+    <img src="app/static/logo-concept-5-vertex.svg" width="56" alt="Minimal vertex" />
+  </picture>&nbsp;&nbsp;&nbsp;
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="app/static/logo-concept-8-elegant-dark.svg" />
+    <img src="app/static/logo-concept-8-elegant.svg" width="56" alt="Pure form" />
+  </picture>&nbsp;&nbsp;&nbsp;
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="app/static/logo-final-dark.svg" />
+    <img src="app/static/logo-final.svg" width="56" alt="Final logo" />
+  </picture>
 </p>
 
 From left to right: a classic Feynman diagram with two vertices and a wavy propagator; an open book whose spine becomes a diagram vertex with knowledge radiating upward; a minimal single vertex where two fermion lines form the shape of **人** (the Chinese character for "person"); the same 人 form with a wavy propagator rising from the mind; and the final version.
