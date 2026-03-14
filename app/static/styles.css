@@ -1277,6 +1277,11 @@ body {
 .topic-tag:hover { color: var(--text); border-color: rgba(128,128,128,0.3); }
 .topic-tag.active { background: var(--btn-solid-bg); color: var(--btn-solid-color); border-color: var(--btn-solid-bg); }
 .topic-tag.loading { opacity: 0.5; pointer-events: none; }
+.topic-tag-clear {
+  color: var(--text-muted); border-color: transparent;
+  font-size: 12px; background: transparent;
+}
+.topic-tag-clear:hover { color: var(--accent); }
 
 /* Discover button */
 .discover-btn {
@@ -1910,6 +1915,9 @@ body {
   font-size: 18px;
   font-weight: 400;
   color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 7px;
 }
 .lp-topbar-cta {
   padding: 6px 16px;

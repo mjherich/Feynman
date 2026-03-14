@@ -549,7 +549,7 @@ function renderLandingPage() {
   el.innerHTML = `
     <div class="lp-container">
       <nav class="lp-topbar">
-        <span class="lp-topbar-brand">Feynman</span>
+        <span class="lp-topbar-brand"><svg width="20" height="21" viewBox="0 0 64 68" fill="none"><path d="M32,30 L8,56 Q4,60 6,62" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M32,30 L56,56 Q60,60 58,62" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><line x1="32" y1="30" x2="32" y2="36" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="32" cy="30" r="3.5" fill="currentColor"/><path d="M32,30 C26,24 38,18 32,12 C26,6 38,0 32,-4" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"/></svg>Feynman</span>
         <div class="lp-topbar-actions">
           <button class="lp-theme-toggle" id="lp-theme-toggle" title="Toggle dark mode">
             <svg class="lp-icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
@@ -1436,7 +1436,10 @@ async function loadTopics() {
 function renderTopicTags() {
   const grid = document.getElementById('topic-tags-grid');
   if (!grid || !topicTags.length) return;
-  grid.innerHTML = topicTags.map(topic => {
+  const clearBtn = activeTopics.size
+    ? '<button class="topic-tag topic-tag-clear" id="topic-clear-all">Clear all ×</button>'
+    : '';
+  grid.innerHTML = clearBtn + topicTags.map(topic => {
     const isLoading = loadingTopics.has(topic);
     const isActive = activeTopics.has(topic);
     let cls = 'topic-tag';
@@ -1445,51 +1448,28 @@ function renderTopicTags() {
     const spinner = isLoading ? '<span class="loading-dot" style="margin-right:5px;font-size:11px">...</span>' : '';
     return `<button class="${cls}" data-topic="${esc(topic)}">${spinner}${esc(topic)}</button>`;
   }).join('');
-  grid.querySelectorAll('.topic-tag').forEach(btn => {
+  grid.querySelectorAll('.topic-tag[data-topic]').forEach(btn => {
     btn.addEventListener('click', () => handleTopicClick(btn.dataset.topic));
   });
+  const clearEl = document.getElementById('topic-clear-all');
+  if (clearEl) {
+    clearEl.addEventListener('click', () => {
+      activeTopics.clear();
+      renderTopicTags();
+      renderLibraryGrid();
+    });
+  }
 }
 
-async function handleTopicClick(topic) {
+function handleTopicClick(topic) {
   if (loadingTopics.has(topic)) return;
-
-  // Toggle filter
   if (activeTopics.has(topic)) {
     activeTopics.delete(topic);
-    renderTopicTags();
-    renderLibraryGrid();
-    return;
+  } else {
+    activeTopics.add(topic);
   }
-
-  activeTopics.add(topic);
   renderTopicTags();
-
-  // Check if any books exist for this topic
-  const hasBooks = allBooks.some(b => (b.category || '').toLowerCase() === topic.toLowerCase());
-  if (hasBooks) {
-    renderLibraryGrid();
-    return;
-  }
-
-  // No books yet — discover them
-  loadingTopics.add(topic);
-  renderTopicTags();
-  try {
-    const data = await api('/api/discover', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topic }),
-    });
-    _searchUsage = data.usage?.total_tokens > 0 ? data.usage : null;
-    await loadAgents();
-  } catch (err) {
-    activeTopics.delete(topic);
-    alert('Discovery failed: ' + err.message);
-  } finally {
-    loadingTopics.delete(topic);
-    renderTopicTags();
-    renderLibraryGrid();
-  }
+  renderLibraryGrid();
 }
 
 // ─── Build book list from agents (DB is the single source of truth) ───
@@ -2398,11 +2378,6 @@ function renderLibraryGrid() {
       c.innerHTML = `<div class="search-discover-prompt"><p style="color:var(--text-muted)">No results for "${esc(librarySearch)}"</p></div>`;
     }
   }
-  // Show token usage for search/discover inline
-  if (_searchUsage && _searchUsage.total_tokens > 0) {
-    c.insertAdjacentHTML('beforeend',
-      `<div class="token-usage" style="grid-column:1/-1;text-align:center;margin-top:8px" title="Input: ${_searchUsage.input_tokens} · Output: ${_searchUsage.output_tokens}">${_searchUsage.total_tokens} tokens</div>`);
-  }
   // Show "Discover more" card when topic filters are active
   if (activeTopics.size && !librarySearch) {
     const topics = [...activeTopics];
@@ -2417,6 +2392,11 @@ function renderLibraryGrid() {
     document.getElementById('discover-more-card').addEventListener('click', () => {
       discoverMore(topics);
     });
+  }
+  // Show token usage for search/discover inline
+  if (_searchUsage && _searchUsage.total_tokens > 0) {
+    c.insertAdjacentHTML('beforeend',
+      `<div class="token-usage" style="grid-column:1/-1;text-align:center;margin-top:8px" title="Input: ${_searchUsage.input_tokens} · Output: ${_searchUsage.output_tokens}">${_searchUsage.total_tokens} tokens</div>`);
   }
 }
 
@@ -3993,6 +3973,10 @@ async function init() {
       document.querySelectorAll('.filter-tag').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       libraryFilter = btn.dataset.filter;
+      if (btn.dataset.filter === 'all') {
+        activeTopics.clear();
+        renderTopicTags();
+      }
       renderLibraryGrid();
     });
   });
