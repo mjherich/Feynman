@@ -324,7 +324,7 @@ function renderSubscriptionPage() {
     el.innerHTML = `<div class="sub-page">
       <div class="sub-header">
         <h1 class="sub-title">Plans</h1>
-        <p class="sub-subtitle">Read smarter. Think deeper. Learn with the greatest minds in history and today's world.</p>
+        <p class="sub-subtitle">Read smarter. Think deeper.<br>Learn with the greatest minds in history and today's world.</p>
       </div>
       <div class="sub-cards">
         <div class="sub-card ${!isPro ? 'sub-card-active' : ''}">
@@ -1844,6 +1844,7 @@ function persistSessions() {
     const data = chatSessions.map(s => ({
       id: s.id, title: s.title, messages: s.messages,
       books: s.books instanceof Map ? [...s.books.entries()] : [],
+      minds: s.minds instanceof Map ? [...s.minds.entries()] : [],
       activeMinds: s.activeMinds instanceof Map ? [...s.activeMinds.entries()] : [],
       updatedAt: s.updatedAt || 0,
       ...(s.mindId ? { mindId: s.mindId } : {}),
@@ -1864,6 +1865,7 @@ function restoreSessions() {
     chatSessions = data.map(s => ({
       ...s,
       books: new Map(s.books || []),
+      minds: new Map(s.minds || []),
       activeMinds: new Map(s.activeMinds || []),
       updatedAt: migrated ? (s.updatedAt || 0) : 0,
       mindId: s.mindId || null,
@@ -1925,8 +1927,8 @@ function saveCurrentSession() {
 }
 
 function switchToSession(id) {
-  if (id === currentSessionId) return;
-  saveCurrentSession();
+  const alreadyCurrent = id === currentSessionId;
+  if (!alreadyCurrent) saveCurrentSession();
   const session = chatSessions.find(s => s.id === id);
   if (!session) return;
   currentSessionId = id;
@@ -1936,24 +1938,26 @@ function switchToSession(id) {
     return;
   }
 
-  selectedBooks = new Map(session.books);
-  selectedMinds = new Map(session.minds || []);
-  activeMinds = new Map(session.activeMinds || []);
-  const chatBox = document.getElementById('chat-messages');
-  chatBox.innerHTML = '';
-  for (const m of session.messages) {
-    if (m.role === 'mind') {
-      appendMindMsg(chatBox, m.mindName, m.content);
-    } else if (m.role === 'system-notice') {
-      appendJoinNotice(chatBox, m.mindNames || []);
-    } else {
-      appendMsg(chatBox, m.role, m.content, m.sources, m.opts);
+  if (!alreadyCurrent) {
+    selectedBooks = new Map(session.books);
+    selectedMinds = new Map(session.minds || []);
+    activeMinds = new Map(session.activeMinds || []);
+    const chatBox = document.getElementById('chat-messages');
+    chatBox.innerHTML = '';
+    for (const m of session.messages) {
+      if (m.role === 'mind') {
+        appendMindMsg(chatBox, m.mindName, m.content);
+      } else if (m.role === 'system-notice') {
+        appendJoinNotice(chatBox, m.mindNames || []);
+      } else {
+        appendMsg(chatBox, m.role, m.content, m.sources, m.opts);
+      }
     }
+    persistSessions();
+    renderSelectedChips();
+    restoreChatSidebar(session.messages);
+    renderChatHistory();
   }
-  persistSessions();
-  renderSelectedChips();
-  restoreChatSidebar(session.messages);
-  renderChatHistory();
   if (getRoute().page !== 'chat') {
     window.location.hash = '#/chat';
   }
@@ -2029,8 +2033,10 @@ function _renderChatsList(query) {
     </div>`
   ).join('');
   listEl.querySelectorAll('.chats-list-item').forEach(el => {
-    el.querySelector('.chats-item-body').addEventListener('click', () => switchToSession(el.dataset.sid));
-    el.querySelector('.chat-item-icon').addEventListener('click', () => switchToSession(el.dataset.sid));
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.chats-delete-btn')) return;
+      switchToSession(el.dataset.sid);
+    });
     el.querySelector('.chats-delete-btn').addEventListener('click', e => { e.stopPropagation(); deleteSession(el.dataset.sid); });
   });
 }
