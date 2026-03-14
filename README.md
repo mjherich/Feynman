@@ -137,45 +137,19 @@ The system auto-selects the best available provider and falls back through the c
 
 ## Logo
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="app/static/logo-final-dark.svg" />
-    <img src="app/static/logo-final.svg" width="80" alt="Feynman logo" />
-  </picture>
-</p>
+The design started from a simple insight: Richard Feynman invented [Feynman diagrams](https://en.wikipedia.org/wiki/Feynman_diagram) — particle interaction diagrams where lines meet at vertices and wavy propagators carry forces between them. That visual language maps perfectly onto what this product does: minds meeting, exchanging knowledge, and leaving enriched.
 
-The design started from a simple insight: Richard Feynman invented Feynman diagrams — particle interaction diagrams where lines meet at vertices and wavy propagators carry forces between them. That visual language maps perfectly onto what this product does: minds meeting, exchanging knowledge, and leaving enriched.
+We explored five directions built on this idea:
 
-We explored several directions built on this idea:
+<img src="docs/logo-concepts-1.png" alt="Logo concepts 1-2: Classic Feynman Diagram and Book Diagram" />
+<img src="docs/logo-concepts-2.png" alt="Logo concepts 3-4: The F Diagram and Chat Bubble Diagram" />
+<img src="docs/logo-concepts-3.png" alt="Logo concept 5: Minimal Vertex" />
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="app/static/logo-concept-1-feynman-diagram-dark.svg" />
-    <img src="app/static/logo-concept-1-feynman-diagram.svg" width="56" alt="Classic diagram" />
-  </picture>&nbsp;&nbsp;&nbsp;
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="app/static/logo-concept-2-book-diagram-dark.svg" />
-    <img src="app/static/logo-concept-2-book-diagram.svg" width="56" alt="Book diagram" />
-  </picture>&nbsp;&nbsp;&nbsp;
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="app/static/logo-concept-5-vertex-dark.svg" />
-    <img src="app/static/logo-concept-5-vertex.svg" width="56" alt="Minimal vertex" />
-  </picture>&nbsp;&nbsp;&nbsp;
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="app/static/logo-concept-8-elegant-dark.svg" />
-    <img src="app/static/logo-concept-8-elegant.svg" width="56" alt="Pure form" />
-  </picture>&nbsp;&nbsp;&nbsp;
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="app/static/logo-final-dark.svg" />
-    <img src="app/static/logo-final.svg" width="56" alt="Final logo" />
-  </picture>
-</p>
+We chose Concept 5 as the starting point — the **人** shape (the Chinese character for "person") — and refined it into the final mark by making the two lines read simultaneously as **a book placed face-down** (covers flaring open, spine at the top). The wavy propagator rising from the vertex is unmistakably a Feynman diagram element — an idea ascending from the point where person meets book.
 
-From left to right: a classic Feynman diagram with two vertices and a wavy propagator; an open book whose spine becomes a diagram vertex with knowledge radiating upward; a minimal single vertex where two fermion lines form the shape of **人** (the Chinese character for "person"); the same 人 form with a wavy propagator rising from the mind; and the final version.
+Four meanings in one mark: person, book, tree of knowledge, Feynman diagram.
 
-We chose the last one because the two lines read simultaneously as **人** (a person — the learner) and **a book placed face-down** (covers flaring open, spine at the top), while the wavy propagator rising from the vertex is unmistakably a Feynman diagram element — an idea ascending from the point where person meets book. Four meanings in one mark: person, book, tree of knowledge, Feynman diagram.
-
-All nine concept SVGs are included in `app/static/` — run the app and visit `/static/logo-preview.html` to preview them at multiple sizes in light and dark mode.
+All concept SVGs are included in `app/static/` — run the app and visit `/static/logo-preview.html` to preview them interactively.
 
 ## Product Updates
 
