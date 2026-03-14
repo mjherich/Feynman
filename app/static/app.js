@@ -396,7 +396,7 @@ function renderSubscriptionPage() {
 function getGreeting() {
   const h = new Date().getHours();
   let g = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
-  if (userName) g += ', ' + userName;
+  if (userName) g += ', ' + userName.split(/\s+/)[0];
   return g;
 }
 
@@ -604,7 +604,7 @@ function renderLandingPage() {
                       <path d="M32,30 C26,24 38,18 32,12 C26,6 38,0 32,-4" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                   </div>
-                  <span class="greeting lp-greeting">${timeGreeting}, Steve</span>
+                  <span class="greeting lp-greeting">${timeGreeting}</span>
                 </div>
                 <div class="chat-composer lp-composer">
                   <div class="selected-chips" id="lp-selected-chips"></div>
@@ -1656,7 +1656,7 @@ function showOnboarding() {
   }
 
   function showStep2() {
-    greetingEl.textContent = 'Nice to meet you, ' + userName + '!';
+    greetingEl.textContent = 'Nice to meet you, ' + userName.split(' ')[0] + '!';
     subtitleEl.textContent = 'Pick topics you\u2019re curious about';
     const selectedTopics = new Set();
     const tags = topicTags.length ? topicTags : ['Philosophy', 'Science', 'History', 'Psychology', 'Economics', 'Literature', 'Technology', 'Mathematics'];
