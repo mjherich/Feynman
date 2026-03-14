@@ -143,9 +143,7 @@ We explored five directions built on this idea:
 
 <img src="docs/logo-concepts.png" alt="Logo design exploration: 5 concepts from Classic Feynman Diagram to the final Minimal Vertex mark" width="800" />
 
-We chose Concept 5 as the starting point — the **人** shape (the Chinese character for "person") — and refined it into the final mark by making the two lines read simultaneously as **a book placed face-down** (covers flaring open, spine at the top). The wavy propagator rising from the vertex is unmistakably a Feynman diagram element — an idea ascending from the point where person meets book.
-
-Four meanings in one mark: person, book, tree of knowledge, Feynman diagram.
+We chose Concept 5 — the **Minimal Vertex**. Two fermion lines converge from below, forming **人** (the Chinese character for "person"). A wavy propagator rises upward like an idea ascending. It's the simplest possible Feynman diagram: one vertex, one moment of interaction where person meets knowledge.
 
 All concept SVGs are included in `app/static/` — run the app and visit `/static/logo-preview.html` to preview them interactively.
 
