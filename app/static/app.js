@@ -328,7 +328,7 @@ function renderSubscriptionPage() {
       'Four-layer answers: text, metadata, web, LLM',
       'Great minds join once per chat',
       'Discover books & topics (3/day)',
-      'Upload your own books (PDF / TXT)',
+      'Upload your own books (PDF / EPUB / TXT / MD)',
     ];
     const proFeatures = [
       'Everything in Free',
@@ -435,7 +435,7 @@ function showProOverlay() {
       'Four-layer answers: text, metadata, web, LLM',
       'Great minds join once per chat',
       'Discover books & topics (3/day)',
-      'Upload your own books (PDF / TXT)',
+      'Upload your own books (PDF / EPUB / TXT / MD)',
     ];
     const proFeatures = [
       'Everything in Free',
