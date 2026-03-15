@@ -280,9 +280,6 @@ def init_db() -> None:
             except Exception:
                 pass
 
-            # Cleanup: purge usage records older than 30 days
-            _execute(conn, "DELETE FROM usage WHERE created_at < NOW() - INTERVAL '30 days'")
-
             # Pro tables
             _execute(conn, """
                 CREATE TABLE IF NOT EXISTS users (
@@ -304,6 +301,9 @@ def init_db() -> None:
                 )
             """)
             _execute(conn, "CREATE INDEX IF NOT EXISTS idx_usage_user_action ON usage(user_id, action, created_at)")
+
+            # Cleanup: purge usage records older than 30 days (must run after table creation)
+            _execute(conn, "DELETE FROM usage WHERE created_at < NOW() - INTERVAL '30 days'")
         else:
             _execute(conn, """
                 CREATE TABLE IF NOT EXISTS agents (
@@ -463,9 +463,6 @@ def init_db() -> None:
             except Exception:
                 pass
 
-            # Cleanup: purge usage records older than 30 days
-            _execute(conn, "DELETE FROM usage WHERE created_at < datetime('now', '-30 days')")
-
             # Pro tables (SQLite)
             _execute(conn, """
                 CREATE TABLE IF NOT EXISTS users (
@@ -487,6 +484,9 @@ def init_db() -> None:
                 )
             """)
             _execute(conn, "CREATE INDEX IF NOT EXISTS idx_usage_user_action ON usage(user_id, action, created_at)")
+
+            # Cleanup: purge usage records older than 30 days (must run after table creation)
+            _execute(conn, "DELETE FROM usage WHERE created_at < datetime('now', '-30 days')")
 
 
 def create_agent(name: str, agent_type: str, source: str | None, meta: dict[str, Any], user_id: str | None = None) -> str:
