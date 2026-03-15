@@ -25,7 +25,6 @@ PUBLIC_PATHS = {
     "/", "/api/health",
     "/api/pro/config",
     "/api/pro/webhook",
-    "/api/pro/debug-token",
     "/api/topics",
     "/api/agents",
     "/api/votes",

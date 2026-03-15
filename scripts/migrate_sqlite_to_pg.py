@@ -40,10 +40,13 @@ def main():
         print(f"Migrating {len(rows)} agents...")
         for r in rows:
             cur.execute("""
-                INSERT INTO agents (id, name, type, source, status, meta_json, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO agents (id, name, type, source, status, meta_json, user_id, is_deleted, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO NOTHING
-            """, (r["id"], r["name"], r["type"], r["source"], r["status"], r["meta_json"], r["created_at"]))
+            """, (r["id"], r["name"], r["type"], r["source"], r["status"], r["meta_json"],
+                  r["user_id"] if "user_id" in r.keys() else None,
+                  bool(r["is_deleted"]) if "is_deleted" in r.keys() else False,
+                  r["created_at"]))
 
         # Chunks
         rows = sq.execute("SELECT * FROM chunks").fetchall()
@@ -60,11 +63,12 @@ def main():
         rows = sq.execute("SELECT * FROM messages").fetchall()
         print(f"Migrating {len(rows)} messages...")
         for r in rows:
+            user_id = r["user_id"] if "user_id" in r.keys() else None
             cur.execute("""
-                INSERT INTO messages (id, agent_id, role, content, created_at)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO messages (id, agent_id, user_id, role, content, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO NOTHING
-            """, (r["id"], r["agent_id"], r["role"], r["content"], r["created_at"]))
+            """, (r["id"], r["agent_id"], user_id, r["role"], r["content"], r["created_at"]))
 
         # Questions
         try:
@@ -132,6 +136,35 @@ def main():
                 """, (r["id"], r["mind_id"], r["user_id"], r["summary"], r["topic"], r["created_at"]))
         except sqlite3.OperationalError:
             print("No mind_memories table in SQLite, skipping.")
+
+        # Chat sessions
+        try:
+            rows = sq.execute("SELECT * FROM chat_sessions").fetchall()
+            print(f"Migrating {len(rows)} chat_sessions...")
+            for r in rows:
+                user_id = r["user_id"] if "user_id" in r.keys() else None
+                cur.execute("""
+                    INSERT INTO chat_sessions (id, user_id, title, session_type, mind_id, meta_json, updated_at, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (id) DO NOTHING
+                """, (r["id"], user_id, r["title"], r["session_type"], r["mind_id"],
+                      r["meta_json"], r["updated_at"], r["created_at"]))
+        except sqlite3.OperationalError:
+            print("No chat_sessions table in SQLite, skipping.")
+
+        # Session messages
+        try:
+            rows = sq.execute("SELECT * FROM session_messages").fetchall()
+            print(f"Migrating {len(rows)} session_messages...")
+            for r in rows:
+                cur.execute("""
+                    INSERT INTO session_messages (id, session_id, role, content, meta_json, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (id) DO NOTHING
+                """, (r["id"], r["session_id"], r["role"], r["content"],
+                      r["meta_json"], r["created_at"]))
+        except sqlite3.OperationalError:
+            print("No session_messages table in SQLite, skipping.")
 
         pg.commit()
         print("Migration complete!")

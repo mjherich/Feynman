@@ -137,9 +137,12 @@ def init_db() -> None:
                     source TEXT,
                     status TEXT NOT NULL,
                     meta_json TEXT,
+                    user_id TEXT,
+                    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
                     created_at TEXT NOT NULL
                 )
             """)
+            _execute(conn, "CREATE INDEX IF NOT EXISTS idx_agents_user ON agents(user_id)")
             _execute(conn, """
                 CREATE TABLE IF NOT EXISTS chunks (
                     id TEXT PRIMARY KEY,
@@ -156,11 +159,13 @@ def init_db() -> None:
                 CREATE TABLE IF NOT EXISTS messages (
                     id TEXT PRIMARY KEY,
                     agent_id TEXT NOT NULL REFERENCES agents(id),
+                    user_id TEXT,
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 )
             """)
+            _execute(conn, "CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(agent_id, user_id)")
             _execute(conn, """
                 CREATE TABLE IF NOT EXISTS questions (
                     id TEXT PRIMARY KEY,
@@ -220,6 +225,7 @@ def init_db() -> None:
             _execute(conn, """
                 CREATE TABLE IF NOT EXISTS chat_sessions (
                     id TEXT PRIMARY KEY,
+                    user_id TEXT,
                     title TEXT NOT NULL DEFAULT 'New chat',
                     session_type TEXT NOT NULL DEFAULT 'chat',
                     mind_id TEXT,
@@ -228,6 +234,7 @@ def init_db() -> None:
                     created_at TEXT NOT NULL
                 )
             """)
+            _execute(conn, "CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(user_id)")
             _execute(conn, """
                 CREATE TABLE IF NOT EXISTS session_messages (
                     id TEXT PRIMARY KEY,
@@ -239,6 +246,42 @@ def init_db() -> None:
                 )
             """)
             _execute(conn, "CREATE INDEX IF NOT EXISTS idx_session_messages_session ON session_messages(session_id)")
+
+            # Migration: add user_id column if missing (existing deployments)
+            try:
+                _execute(conn, "ALTER TABLE chat_sessions ADD COLUMN user_id TEXT")
+                _execute(conn, "CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(user_id)")
+                # Purge orphaned sessions that have no user_id (pre-fix data leak)
+                _execute(conn, """
+                    DELETE FROM session_messages WHERE session_id IN (
+                        SELECT id FROM chat_sessions WHERE user_id IS NULL
+                    )
+                """)
+                _execute(conn, "DELETE FROM chat_sessions WHERE user_id IS NULL")
+            except Exception:
+                pass  # column already exists
+
+            # Migration: add user_id to messages table
+            try:
+                _execute(conn, "ALTER TABLE messages ADD COLUMN user_id TEXT")
+                _execute(conn, "CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(agent_id, user_id)")
+                _execute(conn, "DELETE FROM messages WHERE user_id IS NULL")
+            except Exception:
+                pass
+
+            # Migration: add user_id and is_deleted to agents table
+            try:
+                _execute(conn, "ALTER TABLE agents ADD COLUMN user_id TEXT")
+                _execute(conn, "CREATE INDEX IF NOT EXISTS idx_agents_user ON agents(user_id)")
+            except Exception:
+                pass
+            try:
+                _execute(conn, "ALTER TABLE agents ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE")
+            except Exception:
+                pass
+
+            # Cleanup: purge usage records older than 30 days
+            _execute(conn, "DELETE FROM usage WHERE created_at < NOW() - INTERVAL '30 days'")
 
             # Pro tables
             _execute(conn, """
@@ -260,6 +303,7 @@ def init_db() -> None:
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
+            _execute(conn, "CREATE INDEX IF NOT EXISTS idx_usage_user_action ON usage(user_id, action, created_at)")
         else:
             _execute(conn, """
                 CREATE TABLE IF NOT EXISTS agents (
@@ -269,9 +313,12 @@ def init_db() -> None:
                     source TEXT,
                     status TEXT NOT NULL,
                     meta_json TEXT,
+                    user_id TEXT,
+                    is_deleted INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL
                 )
             """)
+            _execute(conn, "CREATE INDEX IF NOT EXISTS idx_agents_user ON agents(user_id)")
             _execute(conn, """
                 CREATE TABLE IF NOT EXISTS chunks (
                     id TEXT PRIMARY KEY,
@@ -289,12 +336,14 @@ def init_db() -> None:
                 CREATE TABLE IF NOT EXISTS messages (
                     id TEXT PRIMARY KEY,
                     agent_id TEXT NOT NULL,
+                    user_id TEXT,
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(agent_id) REFERENCES agents(id)
                 )
             """)
+            _execute(conn, "CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(agent_id, user_id)")
             _execute(conn, """
                 CREATE TABLE IF NOT EXISTS questions (
                     id TEXT PRIMARY KEY,
@@ -358,6 +407,7 @@ def init_db() -> None:
             _execute(conn, """
                 CREATE TABLE IF NOT EXISTS chat_sessions (
                     id TEXT PRIMARY KEY,
+                    user_id TEXT,
                     title TEXT NOT NULL DEFAULT 'New chat',
                     session_type TEXT NOT NULL DEFAULT 'chat',
                     mind_id TEXT,
@@ -366,6 +416,7 @@ def init_db() -> None:
                     created_at TEXT NOT NULL
                 )
             """)
+            _execute(conn, "CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(user_id)")
             _execute(conn, """
                 CREATE TABLE IF NOT EXISTS session_messages (
                     id TEXT PRIMARY KEY,
@@ -378,6 +429,42 @@ def init_db() -> None:
                 )
             """)
             _execute(conn, "CREATE INDEX IF NOT EXISTS idx_session_messages_session ON session_messages(session_id)")
+
+            # Migration: add user_id column if missing (existing deployments)
+            try:
+                _execute(conn, "ALTER TABLE chat_sessions ADD COLUMN user_id TEXT")
+                _execute(conn, "CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(user_id)")
+                # Purge orphaned sessions that have no user_id (pre-fix data leak)
+                _execute(conn, """
+                    DELETE FROM session_messages WHERE session_id IN (
+                        SELECT id FROM chat_sessions WHERE user_id IS NULL
+                    )
+                """)
+                _execute(conn, "DELETE FROM chat_sessions WHERE user_id IS NULL")
+            except Exception:
+                pass  # column already exists
+
+            # Migration: add user_id to messages table
+            try:
+                _execute(conn, "ALTER TABLE messages ADD COLUMN user_id TEXT")
+                _execute(conn, "CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(agent_id, user_id)")
+                _execute(conn, "DELETE FROM messages WHERE user_id IS NULL")
+            except Exception:
+                pass
+
+            # Migration: add user_id and is_deleted to agents table
+            try:
+                _execute(conn, "ALTER TABLE agents ADD COLUMN user_id TEXT")
+                _execute(conn, "CREATE INDEX IF NOT EXISTS idx_agents_user ON agents(user_id)")
+            except Exception:
+                pass
+            try:
+                _execute(conn, "ALTER TABLE agents ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0")
+            except Exception:
+                pass
+
+            # Cleanup: purge usage records older than 30 days
+            _execute(conn, "DELETE FROM usage WHERE created_at < datetime('now', '-30 days')")
 
             # Pro tables (SQLite)
             _execute(conn, """
@@ -399,14 +486,15 @@ def init_db() -> None:
                     created_at TEXT NOT NULL DEFAULT (datetime('now'))
                 )
             """)
+            _execute(conn, "CREATE INDEX IF NOT EXISTS idx_usage_user_action ON usage(user_id, action, created_at)")
 
 
-def create_agent(name: str, agent_type: str, source: str | None, meta: dict[str, Any]) -> str:
+def create_agent(name: str, agent_type: str, source: str | None, meta: dict[str, Any], user_id: str | None = None) -> str:
     agent_id = str(uuid.uuid4())
     with get_conn() as conn:
         _execute(conn, _q(
-            "INSERT INTO agents (id, name, type, source, status, meta_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-        ), (agent_id, name, agent_type, source, "indexing", json.dumps(meta), _utcnow()))
+            "INSERT INTO agents (id, name, type, source, status, meta_json, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        ), (agent_id, name, agent_type, source, "indexing", json.dumps(meta), user_id, _utcnow()))
     return agent_id
 
 
@@ -430,7 +518,9 @@ def get_agent(agent_id: str) -> dict[str, Any] | None:
 
 def list_agents() -> list[dict[str, Any]]:
     with get_conn() as conn:
-        rows = _fetchall(conn, "SELECT * FROM agents ORDER BY created_at DESC")
+        rows = _fetchall(conn, _q(
+            "SELECT * FROM agents WHERE is_deleted = ? ORDER BY created_at DESC"
+        ), (False if _USE_PG else 0,))
         return [_row_to_agent(r) for r in rows]
 
 
@@ -443,6 +533,8 @@ def _row_to_agent(row: dict[str, Any]) -> dict[str, Any]:
         "source": row["source"],
         "status": row["status"],
         "meta": json.loads(meta_json),
+        "user_id": row.get("user_id"),
+        "is_deleted": bool(row.get("is_deleted", False)),
         "created_at": row["created_at"],
     }
 
@@ -473,18 +565,22 @@ def get_chunks(agent_id: str) -> list[dict[str, Any]]:
         ), (agent_id,))
 
 
-def add_message(agent_id: str, role: str, content: str) -> None:
+def add_message(agent_id: str, role: str, content: str, user_id: str | None = None) -> None:
+    if not user_id:
+        return
     with get_conn() as conn:
         _execute(conn, _q(
-            "INSERT INTO messages (id, agent_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)"
-        ), (str(uuid.uuid4()), agent_id, role, content, _utcnow()))
+            "INSERT INTO messages (id, agent_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+        ), (str(uuid.uuid4()), agent_id, user_id, role, content, _utcnow()))
 
 
-def list_messages(agent_id: str, limit: int = 50) -> list[dict[str, Any]]:
+def list_messages(agent_id: str, limit: int = 50, user_id: str | None = None) -> list[dict[str, Any]]:
+    if not user_id:
+        return []
     with get_conn() as conn:
         rows = _fetchall(conn, _q(
-            "SELECT role, content, created_at FROM messages WHERE agent_id = ? ORDER BY created_at DESC LIMIT ?"
-        ), (agent_id, limit))
+            "SELECT role, content, created_at FROM messages WHERE agent_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT ?"
+        ), (agent_id, user_id, limit))
         return list(reversed(rows))
 
 
@@ -531,12 +627,18 @@ def upvote(vote_id: str) -> dict[str, Any] | None:
         return {"id": row["id"], "title": row["title"], "count": row["count"] + 1}
 
 
-def delete_agent(agent_id: str) -> bool:
+def delete_agent(agent_id: str, user_id: str | None = None) -> bool:
+    """Soft-delete: mark agent as deleted. Only the uploader (owner) may delete."""
     with get_conn() as conn:
-        _execute(conn, _q("DELETE FROM chunks WHERE agent_id = ?"), (agent_id,))
-        _execute(conn, _q("DELETE FROM messages WHERE agent_id = ?"), (agent_id,))
-        _execute(conn, _q("DELETE FROM questions WHERE agent_id = ?"), (agent_id,))
-        cur = _execute(conn, _q("DELETE FROM agents WHERE id = ?"), (agent_id,))
+        agent = _fetchone(conn, _q("SELECT user_id FROM agents WHERE id = ?"), (agent_id,))
+        if not agent:
+            return False
+        if agent["user_id"] and user_id != agent["user_id"]:
+            return False
+        deleted_val = True if _USE_PG else 1
+        cur = _execute(conn, _q(
+            "UPDATE agents SET is_deleted = ? WHERE id = ?"
+        ), (deleted_val, agent_id))
         return cur.rowcount > 0
 
 
@@ -760,52 +862,77 @@ def list_user_interest_profile(user_id: str, limit: int = 50) -> list[dict[str, 
 # ─── Chat sessions ───
 
 def create_chat_session(title: str = "New chat", session_type: str = "chat",
-                        mind_id: str | None = None, meta: dict[str, Any] | None = None) -> dict[str, Any]:
+                        mind_id: str | None = None, meta: dict[str, Any] | None = None,
+                        user_id: str | None = None) -> dict[str, Any]:
     session_id = str(uuid.uuid4())
     now = _utcnow()
     with get_conn() as conn:
         _execute(conn, _q(
-            "INSERT INTO chat_sessions (id, title, session_type, mind_id, meta_json, updated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-        ), (session_id, title, session_type, mind_id, json.dumps(meta or {}), now, now))
-    return {"id": session_id, "title": title, "session_type": session_type,
+            "INSERT INTO chat_sessions (id, user_id, title, session_type, mind_id, meta_json, updated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        ), (session_id, user_id, title, session_type, mind_id, json.dumps(meta or {}), now, now))
+    return {"id": session_id, "user_id": user_id, "title": title, "session_type": session_type,
             "mind_id": mind_id, "meta": meta or {}, "updated_at": now, "created_at": now}
 
 
-def list_chat_sessions() -> list[dict[str, Any]]:
+def list_chat_sessions(user_id: str | None = None) -> list[dict[str, Any]]:
+    if not user_id:
+        return []
     with get_conn() as conn:
-        rows = _fetchall(conn, "SELECT * FROM chat_sessions ORDER BY updated_at DESC")
+        rows = _fetchall(conn, _q(
+            "SELECT * FROM chat_sessions WHERE user_id = ? ORDER BY updated_at DESC"
+        ), (user_id,))
         return [_row_to_session(r) for r in rows]
 
 
-def get_chat_session(session_id: str) -> dict[str, Any] | None:
+def get_chat_session(session_id: str, user_id: str | None = None) -> dict[str, Any] | None:
+    if not user_id:
+        return None
     with get_conn() as conn:
-        row = _fetchone(conn, _q("SELECT * FROM chat_sessions WHERE id = ?"), (session_id,))
+        row = _fetchone(conn, _q(
+            "SELECT * FROM chat_sessions WHERE id = ? AND user_id = ?"
+        ), (session_id, user_id))
         if not row:
             return None
         return _row_to_session(row)
 
 
 def update_chat_session(session_id: str, title: str | None = None,
-                        meta: dict[str, Any] | None = None) -> None:
+                        meta: dict[str, Any] | None = None,
+                        user_id: str | None = None) -> None:
+    if not user_id:
+        return
     with get_conn() as conn:
+        session = _fetchone(conn, _q(
+            "SELECT user_id FROM chat_sessions WHERE id = ? AND user_id = ?"
+        ), (session_id, user_id))
+        if not session:
+            return
         if title is not None:
-            _execute(conn, _q("UPDATE chat_sessions SET title = ?, updated_at = ? WHERE id = ?"),
-                     (title, _utcnow(), session_id))
+            _execute(conn, _q("UPDATE chat_sessions SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?"),
+                     (title, _utcnow(), session_id, user_id))
         if meta is not None:
-            _execute(conn, _q("UPDATE chat_sessions SET meta_json = ?, updated_at = ? WHERE id = ?"),
-                     (json.dumps(meta), _utcnow(), session_id))
+            _execute(conn, _q("UPDATE chat_sessions SET meta_json = ?, updated_at = ? WHERE id = ? AND user_id = ?"),
+                     (json.dumps(meta), _utcnow(), session_id, user_id))
 
 
-def delete_chat_session(session_id: str) -> bool:
+def delete_chat_session(session_id: str, user_id: str | None = None) -> bool:
+    if not user_id:
+        return False
     with get_conn() as conn:
+        session = _fetchone(conn, _q(
+            "SELECT id FROM chat_sessions WHERE id = ? AND user_id = ?"
+        ), (session_id, user_id))
+        if not session:
+            return False
         _execute(conn, _q("DELETE FROM session_messages WHERE session_id = ?"), (session_id,))
-        cur = _execute(conn, _q("DELETE FROM chat_sessions WHERE id = ?"), (session_id,))
+        cur = _execute(conn, _q("DELETE FROM chat_sessions WHERE id = ? AND user_id = ?"), (session_id, user_id))
         return cur.rowcount > 0
 
 
 def _row_to_session(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": row["id"],
+        "user_id": row.get("user_id"),
         "title": row["title"],
         "session_type": row.get("session_type", "chat"),
         "mind_id": row.get("mind_id"),
@@ -816,19 +943,35 @@ def _row_to_session(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def add_session_message(session_id: str, role: str, content: str,
-                        meta: dict[str, Any] | None = None) -> dict[str, Any]:
+                        meta: dict[str, Any] | None = None,
+                        user_id: str | None = None) -> dict[str, Any]:
+    if not user_id:
+        raise ValueError("Authentication required")
     msg_id = str(uuid.uuid4())
     now = _utcnow()
     with get_conn() as conn:
+        session = _fetchone(conn, _q(
+            "SELECT id FROM chat_sessions WHERE id = ? AND user_id = ?"
+        ), (session_id, user_id))
+        if not session:
+            raise ValueError("Session not found or access denied")
         _execute(conn, _q(
             "INSERT INTO session_messages (id, session_id, role, content, meta_json, created_at) VALUES (?, ?, ?, ?, ?, ?)"
         ), (msg_id, session_id, role, content, json.dumps(meta or {}), now))
-        _execute(conn, _q("UPDATE chat_sessions SET updated_at = ? WHERE id = ?"), (now, session_id))
+        _execute(conn, _q("UPDATE chat_sessions SET updated_at = ? WHERE id = ? AND user_id = ?"),
+                 (now, session_id, user_id))
     return {"id": msg_id, "role": role, "content": content, "meta": meta or {}, "created_at": now}
 
 
-def list_session_messages(session_id: str) -> list[dict[str, Any]]:
+def list_session_messages(session_id: str, user_id: str | None = None) -> list[dict[str, Any]]:
+    if not user_id:
+        return []
     with get_conn() as conn:
+        session = _fetchone(conn, _q(
+            "SELECT id FROM chat_sessions WHERE id = ? AND user_id = ?"
+        ), (session_id, user_id))
+        if not session:
+            return []
         rows = _fetchall(conn, _q(
             "SELECT id, role, content, meta_json, created_at FROM session_messages WHERE session_id = ? ORDER BY created_at ASC"
         ), (session_id,))

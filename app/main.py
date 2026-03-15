@@ -133,6 +133,9 @@ def _track_usage(request: Request, action: str, tokens: int = 0) -> None:
         from .pro.quota import track_usage
         track_usage(request, action, tokens)
 
+def _get_user_id(request: Request) -> str | None:
+    return getattr(request.state, "user_id", None)
+
 static_dir = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
@@ -563,49 +566,6 @@ def pro_config() -> dict[str, Any]:
     }
 
 
-@app.get("/api/pro/debug-token")
-def debug_token(request: Request) -> dict[str, Any]:
-    """Temporary debug endpoint — inspect JWT claims without verification."""
-    import jwt as _jwt
-    auth = request.headers.get("authorization", "")
-    if not auth.startswith("Bearer "):
-        return {"error": "no token", "hint": "Authorization header missing or not Bearer"}
-    token = auth[7:]
-    secret = os.getenv("SUPABASE_JWT_SECRET", "")
-    secret_stripped = secret.strip()
-    result: dict[str, Any] = {
-        "secret_len_raw": len(secret),
-        "secret_len_stripped": len(secret_stripped),
-        "secret_first8": secret_stripped[:8],
-        "secret_last4": secret_stripped[-4:] if secret_stripped else "",
-        "secret_has_newline": "\n" in secret,
-    }
-    try:
-        header = _jwt.get_unverified_header(token)
-        claims = _jwt.decode(token, options={"verify_signature": False})
-        result["header"] = header
-        result["claims_keys"] = list(claims.keys())
-        result["aud"] = claims.get("aud")
-        result["iss"] = claims.get("iss")
-        result["role"] = claims.get("role")
-        result["exp"] = claims.get("exp")
-        result["email"] = claims.get("email")
-    except Exception as e:
-        result["decode_error"] = str(e)
-        return result
-    try:
-        _jwt.decode(token, secret_stripped, algorithms=["HS256"], audience="authenticated")
-        result["verify_result"] = "OK"
-    except Exception as e:
-        result["verify_result"] = f"FAILED: {e}"
-        try:
-            _jwt.decode(token, secret_stripped, algorithms=["HS256"], options={"verify_aud": False})
-            result["verify_no_aud"] = "OK (signature valid, audience mismatch)"
-        except Exception as e2:
-            result["verify_no_aud"] = f"FAILED: {e2}"
-    return result
-
-
 # ─── Agent endpoints ───
 
 @app.get("/api/agents")
@@ -622,14 +582,17 @@ def api_get_agent(agent_id: str) -> dict[str, Any]:
 
 
 @app.delete("/api/agents/{agent_id}")
-def api_delete_agent(agent_id: str) -> dict[str, Any]:
+def api_delete_agent(agent_id: str, request: Request) -> dict[str, Any]:
+    user_id = _get_user_id(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
     agent = get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    # Remove uploaded file
-    for f in config.UPLOAD_DIR.glob(f"{agent_id}_*"):
-        f.unlink(missing_ok=True)
-    delete_agent(agent_id)
+    if agent.get("user_id") and agent["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Only the uploader can delete this book")
+    if not delete_agent(agent_id, user_id):
+        raise HTTPException(status_code=403, detail="Delete not permitted")
     return {"status": "deleted"}
 
 
@@ -643,8 +606,9 @@ def _run_index(agent_id: str, text: str) -> None:
 @app.post("/api/agents/upload")
 def api_create_upload_agent(request: Request, background_tasks: BackgroundTasks, file: UploadFile = File(...)) -> dict[str, Any]:
     _check_quota(request, "upload")
+    user_id = _get_user_id(request)
     name = Path(file.filename).stem if file.filename else "Uploaded Book"
-    agent_id = create_agent(name=name, agent_type="upload", source=file.filename, meta={})
+    agent_id = create_agent(name=name, agent_type="upload", source=file.filename, meta={}, user_id=user_id)
     dest = config.UPLOAD_DIR / f"{agent_id}_{file.filename}"
     with dest.open("wb") as f:
         f.write(file.file.read())
@@ -656,11 +620,13 @@ def api_create_upload_agent(request: Request, background_tasks: BackgroundTasks,
         raise HTTPException(status_code=400, detail=str(exc))
 
     background_tasks.add_task(_run_index, agent_id, text)
+    _track_usage(request, "upload")
     return {"id": agent_id, "status": "indexing"}
 
 
 @app.post("/api/agents/topic")
-def api_create_topic_agent(payload: TopicAgentRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
+def api_create_topic_agent(payload: TopicAgentRequest, request: Request, background_tasks: BackgroundTasks) -> dict[str, Any]:
+    _check_quota(request, "upload")
     topic = payload.topic.strip()
     if not topic:
         raise HTTPException(status_code=400, detail="Topic is required")
@@ -674,7 +640,8 @@ def api_create_topic_agent(payload: TopicAgentRequest, background_tasks: Backgro
     if not text:
         raise HTTPException(status_code=400, detail="No source text found. Try another topic or upload material.")
 
-    agent_id = create_agent(name=topic, agent_type="topic", source="wikipedia", meta={"language": payload.language})
+    user_id = _get_user_id(request)
+    agent_id = create_agent(name=topic, agent_type="topic", source="wikipedia", meta={"language": payload.language}, user_id=user_id)
     background_tasks.add_task(_run_index, agent_id, text)
     _track_usage(request, "upload")
     return {"id": agent_id, "status": "indexing"}
@@ -720,7 +687,8 @@ def api_chat(agent_id: str, payload: ChatRequest, request: Request, background_t
     else:
         user_prompt = payload.message
 
-    history = [{"role": msg["role"], "content": msg["content"]} for msg in list_messages(agent_id, limit=6)]
+    uid = _get_user_id(request)
+    history = [{"role": msg["role"], "content": msg["content"]} for msg in list_messages(agent_id, limit=6, user_id=uid)]
 
     try:
         result, chat_provider = chat_with_fallback(
@@ -730,8 +698,8 @@ def api_chat(agent_id: str, payload: ChatRequest, request: Request, background_t
     except ProviderError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    add_message(agent_id, "user", payload.message)
-    add_message(agent_id, "assistant", result.content)
+    add_message(agent_id, "user", payload.message, user_id=uid)
+    add_message(agent_id, "assistant", result.content, user_id=uid)
 
     # Process LLM recommendations in background
     background_tasks.add_task(_process_recommendations, result.content)
@@ -1002,11 +970,11 @@ def api_get_questions(agent_id: str) -> dict[str, Any]:
 # ─── Messages endpoint ───
 
 @app.get("/api/agents/{agent_id}/messages")
-def api_get_messages(agent_id: str) -> list[dict[str, Any]]:
+def api_get_messages(agent_id: str, request: Request) -> list[dict[str, Any]]:
     agent = get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    return list_messages(agent_id, limit=50)
+    return list_messages(agent_id, limit=50, user_id=_get_user_id(request))
 
 
 # ─── Chat sessions endpoints ───
@@ -1030,56 +998,60 @@ class AddSessionMessageRequest(BaseModel):
 
 
 @app.get("/api/sessions")
-def api_list_sessions() -> list[dict[str, Any]]:
-    return list_chat_sessions()
+def api_list_sessions(request: Request) -> list[dict[str, Any]]:
+    return list_chat_sessions(user_id=_get_user_id(request))
 
 
 @app.post("/api/sessions")
-def api_create_session(payload: CreateSessionRequest) -> dict[str, Any]:
+def api_create_session(payload: CreateSessionRequest, request: Request) -> dict[str, Any]:
     return create_chat_session(
         title=payload.title, session_type=payload.session_type,
         mind_id=payload.mind_id, meta=payload.meta,
+        user_id=_get_user_id(request),
     )
 
 
 @app.get("/api/sessions/{session_id}")
-def api_get_session(session_id: str) -> dict[str, Any]:
-    session = get_chat_session(session_id)
+def api_get_session(session_id: str, request: Request) -> dict[str, Any]:
+    session = get_chat_session(session_id, user_id=_get_user_id(request))
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return session
 
 
 @app.patch("/api/sessions/{session_id}")
-def api_update_session(session_id: str, payload: UpdateSessionRequest) -> dict[str, Any]:
-    session = get_chat_session(session_id)
+def api_update_session(session_id: str, payload: UpdateSessionRequest, request: Request) -> dict[str, Any]:
+    uid = _get_user_id(request)
+    session = get_chat_session(session_id, user_id=uid)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    update_chat_session(session_id, title=payload.title, meta=payload.meta)
-    return get_chat_session(session_id)
+    update_chat_session(session_id, title=payload.title, meta=payload.meta, user_id=uid)
+    return get_chat_session(session_id, user_id=uid)
 
 
 @app.delete("/api/sessions/{session_id}")
-def api_delete_session(session_id: str) -> dict[str, Any]:
-    if not delete_chat_session(session_id):
+def api_delete_session(session_id: str, request: Request) -> dict[str, Any]:
+    if not delete_chat_session(session_id, user_id=_get_user_id(request)):
         raise HTTPException(status_code=404, detail="Session not found")
     return {"status": "deleted"}
 
 
 @app.get("/api/sessions/{session_id}/messages")
-def api_list_session_messages(session_id: str) -> list[dict[str, Any]]:
-    session = get_chat_session(session_id)
+def api_list_session_messages(session_id: str, request: Request) -> list[dict[str, Any]]:
+    uid = _get_user_id(request)
+    session = get_chat_session(session_id, user_id=uid)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    return list_session_messages(session_id)
+    return list_session_messages(session_id, user_id=uid)
 
 
 @app.post("/api/sessions/{session_id}/messages")
-def api_add_session_message(session_id: str, payload: AddSessionMessageRequest) -> dict[str, Any]:
-    session = get_chat_session(session_id)
+def api_add_session_message(session_id: str, payload: AddSessionMessageRequest, request: Request) -> dict[str, Any]:
+    uid = _get_user_id(request)
+    session = get_chat_session(session_id, user_id=uid)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    return add_session_message(session_id, role=payload.role, content=payload.content, meta=payload.meta)
+    return add_session_message(session_id, role=payload.role, content=payload.content, meta=payload.meta, user_id=uid)
 
 
 # ─── User interest profile (for future user matching) ───
@@ -1291,18 +1263,21 @@ def api_mind_chat(mind_id: str, payload: MindChatRequest, request: Request, back
     if payload.history:
         history = [{"role": m.role, "content": m.content} for m in payload.history]
 
+    uid = _get_user_id(request)
     try:
         result = mind_chat(
             mind, payload.message,
             book_context=book_ctx,
             agent_ids=agent_ids if agent_ids else None,
             history=history,
+            user_id=uid,
         )
     except ProviderError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
     background_tasks.add_task(
-        extract_and_save_memory, mind["id"], payload.message, result["response"]
+        extract_and_save_memory, mind["id"], payload.message, result["response"],
+        user_id=uid,
     )
 
     _track_usage(request, "mind_chat")
@@ -1348,12 +1323,14 @@ def api_panel_chat(payload: PanelChatRequest, request: Request, background_tasks
     if payload.history:
         history = [{"role": m.role, "content": m.content} for m in payload.history]
 
+    uid = _get_user_id(request)
     try:
         results = panel_chat(
             minds, payload.message,
             book_context=book_ctx,
             agent_ids=agent_ids if agent_ids else None,
             history=history,
+            user_id=uid,
             invited_mind_ids=payload.invited_mind_ids,
             is_mention=bool(payload.target_minds),
         )
@@ -1364,7 +1341,8 @@ def api_panel_chat(payload: PanelChatRequest, request: Request, background_tasks
     for r in results:
         if r.get("response") and not r["response"].startswith("["):
             background_tasks.add_task(
-                extract_and_save_memory, r["mind_id"], payload.message, r["response"]
+                extract_and_save_memory, r["mind_id"], payload.message, r["response"],
+                user_id=uid,
             )
 
     total_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}

@@ -1443,7 +1443,7 @@ function _startLandingChatDemo(scenes) {
       } else if (msg.role === 'mind') {
         const div = document.createElement('div');
         div.className = 'lp-msg lp-msg-mind';
-        div.innerHTML = `<div class="lp-mind-header">${_mindAvatar(msg.name, msg.color)}<span class="lp-mn-name">${esc(msg.name)}</span></div><div class="lp-mind-body"></div>`;
+        div.innerHTML = `${_mindAvatar(msg.name, msg.color)}<div class="lp-mind-body-wrap"><div class="lp-mind-header"><span class="lp-mn-name">${esc(msg.name)}</span></div><div class="lp-mind-body"></div></div>`;
         _animateIn(div);
         bodyEl.appendChild(div);
         const bodyDiv = div.querySelector('.lp-mind-body');
@@ -1622,6 +1622,7 @@ function buildBookList() {
       isUploaded: a.type === 'upload',
       isCatalog: a.type === 'catalog',
       upvotes: 0,
+      created_at: a.created_at || '',
     };
   });
 
@@ -1915,14 +1916,19 @@ function appendMindMsg(container, mindName, text) {
   el.dataset.mindName = mindName;
   const color = mindColor(mindName);
   const initials = mindInitials(mindName);
-  const header = document.createElement('div');
-  header.className = 'mind-msg-header';
-  header.innerHTML = `<div class="mind-msg-avatar" style="background:${color}">${initials}</div><span class="mind-msg-name">${esc(mindName)}</span>`;
-  el.appendChild(header);
+  const avatar = document.createElement('div');
+  avatar.className = 'mind-msg-avatar';
+  avatar.style.background = color;
+  avatar.textContent = initials;
+  el.appendChild(avatar);
+  const body = document.createElement('div');
+  body.className = 'mind-msg-body';
+  body.innerHTML = `<div class="mind-msg-name">${esc(mindName)}</div>`;
   const content = document.createElement('div');
   content.className = 'msg-content mind-msg-content';
   content.innerHTML = renderMarkdown(text);
-  el.appendChild(content);
+  body.appendChild(content);
+  el.appendChild(body);
   container.appendChild(el);
   container.scrollTop = container.scrollHeight;
 }
@@ -2611,7 +2617,7 @@ function renderLibraryGrid() {
   const c = document.getElementById('library-grid');
   let filtered = [...allBooks];
   if (libraryFilter === 'available') filtered = filtered.filter(b => b.available);
-  else if (libraryFilter === 'popular') filtered.sort((a,b) => (b.upvotes||0) - (a.upvotes||0));
+  else if (libraryFilter === 'recent') filtered.sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
   if (activeTopics.size) {
     const topics = new Set([...activeTopics].map(t => t.toLowerCase()));
     filtered = filtered.filter(b => topics.has((b.category || '').toLowerCase()));
