@@ -1519,6 +1519,12 @@ function toggleSidebar() {
 }
 
 // ─── API ───
+function _parseApiError(status, d) {
+  if (status === 413) return 'File is too large. Maximum upload size is 4 MB.';
+  const detail = typeof d.detail === 'string' ? d.detail : (d.detail?.message || '');
+  return detail || `Request failed (${status})`;
+}
+
 async function api(path, opts = {}) {
   if (authToken) {
     opts.headers = { ...(opts.headers || {}), 'Authorization': 'Bearer ' + authToken };
@@ -1547,7 +1553,7 @@ async function api(path, opts = {}) {
     window.location.hash = '#/login';
     throw new Error('Please sign in to continue');
   }
-  if (!r.ok) throw new Error(d.detail || (typeof d.detail === 'object' ? d.detail.message : '') || 'Request failed');
+  if (!r.ok) throw new Error(_parseApiError(r.status, d));
   return d;
 }
 
@@ -2891,6 +2897,7 @@ async function sendBookChat(bookId, message) {
 }
 
 // ─── Upload (multi-file) — auto-selects uploaded books as chips ───
+const MAX_UPLOAD_SIZE_MB = 4;
 async function handleFileUpload(files, statusElId) {
   const statusEl = statusElId ? document.getElementById(statusElId) : null;
   const fileList = Array.from(files);
@@ -2898,6 +2905,11 @@ async function handleFileUpload(files, statusElId) {
   const uploadedAgentIds = [];
 
   for (const file of fileList) {
+    if (file.size > MAX_UPLOAD_SIZE_MB * 1024 * 1024) {
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+      if (statusEl) statusEl.textContent = `"${file.name}" is too large (${sizeMB} MB). Maximum file size is ${MAX_UPLOAD_SIZE_MB} MB.`;
+      return;
+    }
     if (statusEl) statusEl.textContent = `Uploading "${file.name}"${fileList.length > 1 ? ` (${uploaded+1}/${fileList.length})` : ''}...`;
     const fd = new FormData();
     fd.append('file', file);

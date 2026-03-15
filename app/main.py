@@ -611,6 +611,7 @@ def api_create_upload_agent(request: Request, background_tasks: BackgroundTasks,
     user_id = _get_user_id(request)
     name = Path(file.filename).stem if file.filename else "Uploaded Book"
     agent_id = create_agent(name=name, agent_type="upload", source=file.filename, meta={}, user_id=user_id)
+    config.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     dest = config.UPLOAD_DIR / f"{agent_id}_{file.filename}"
     with dest.open("wb") as f:
         f.write(file.file.read())
@@ -620,6 +621,8 @@ def api_create_upload_agent(request: Request, background_tasks: BackgroundTasks,
     except Exception as exc:
         update_agent_status(agent_id, "error", {"error": str(exc)})
         raise HTTPException(status_code=400, detail=str(exc))
+    finally:
+        dest.unlink(missing_ok=True)
 
     background_tasks.add_task(_run_index, agent_id, text)
     _track_usage(request, "upload")

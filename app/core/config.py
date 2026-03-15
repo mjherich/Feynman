@@ -10,7 +10,8 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data"))
-UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", DATA_DIR / "uploads"))
+_default_upload = "/tmp/uploads" if os.getenv("VERCEL") else str(DATA_DIR / "uploads")
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", _default_upload))
 DB_PATH = Path(os.getenv("DB_PATH", DATA_DIR / "chatbook.db"))
 
 APP_NAME = os.getenv("APP_NAME", "Feynman")
