@@ -108,7 +108,7 @@ SEED_MINDS: list[dict[str, str]] = [
 def _generate_persona_prompt(name: str, era: str, domain: str) -> str:
     is_contemporary = "present" in era.lower() or any(
         int(y) > 1960 for y in re.findall(r'\b(19\d{2}|20\d{2})\b', era)
-    )
+    ) if era else False
     extra = ""
     if is_contemporary:
         extra = (
@@ -117,8 +117,19 @@ def _generate_persona_prompt(name: str, era: str, domain: str) -> str:
             "8. Their most famous or viral statements\n\n"
             "For 'works', include books, essays, blog posts, famous talks, or notable interviews.\n\n"
         )
+    context = f'{name}'
+    if era:
+        context += f' ({era})'
+    if domain:
+        context += f', known for: {domain}'
+    era_domain_keys = ''
+    if not era or not domain:
+        era_domain_keys = (
+            '  "era": "birth-death years or century, e.g. 369-286 BC",\n'
+            '  "domain": "comma-separated fields of expertise",\n'
+        )
     return (
-        f'Create a detailed persona profile for {name} ({era}), known for: {domain}.\n\n'
+        f'Create a detailed persona profile for {context}.\n\n'
         'Capture:\n'
         '1. Their intellectual style — how they reason, argue, and explain\n'
         '2. Their vocabulary and rhetorical patterns\n'
@@ -128,6 +139,7 @@ def _generate_persona_prompt(name: str, era: str, domain: str) -> str:
         + extra +
         '\nReturn ONLY a JSON object with these keys:\n'
         '{\n'
+        + era_domain_keys +
         '  "bio_summary": "2-3 sentence biography",\n'
         '  "persona": "detailed system prompt capturing their voice, 300-500 words",\n'
         '  "works": ["title1", "title2", ...],\n'
@@ -166,8 +178,8 @@ def get_or_create_mind(name: str, era: str = "", domain: str = "") -> dict[str, 
 
     mind_data = {
         "name": name,
-        "era": era,
-        "domain": domain,
+        "era": era or data.get("era", ""),
+        "domain": domain or data.get("domain", ""),
         "bio_summary": data.get("bio_summary", ""),
         "persona": data.get("persona", ""),
         "works": data.get("works", []),
@@ -177,14 +189,17 @@ def get_or_create_mind(name: str, era: str = "", domain: str = "") -> dict[str, 
     mind_id = create_mind(mind_data)
     mind = get_mind(mind_id)
 
-    # Link works to book agents
+    # Link works to book agents (non-fatal — mind is still valid without linked works)
     for title in mind_data["works"][:5]:
-        agent = find_agent_by_name(title)
-        if not agent:
-            agent_id = create_catalog_agent(title=title, author=name)
-        else:
-            agent_id = agent["id"]
-        link_mind_work(mind_id, agent_id)
+        try:
+            agent = find_agent_by_name(title)
+            if not agent:
+                agent_id = create_catalog_agent(title=title, author=name)
+            else:
+                agent_id = agent["id"]
+            link_mind_work(mind_id, agent_id)
+        except Exception as exc:
+            log.warning("Failed to link work '%s' for mind '%s': %s", title, name, exc)
 
     log.info("Generated mind: %s (%s)", name, era)
     return mind

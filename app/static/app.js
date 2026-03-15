@@ -2392,15 +2392,40 @@ async function _inviteMindsToChat(chatBox, message, bookContext, agentIds, targe
                 newJoinedNames.push(mind.name);
               }
             }
-          } catch { /* skip */ }
+          } catch (genErr) { console.warn('[minds] generate failed for', s.name, genErr); }
         }
         _mindsInvitedOnce = true;
-      } catch { /* suggestion failed, proceed with existing */ }
+      } catch (suggestErr) { console.warn('[minds] suggest failed:', suggestErr); }
+    }
+
+    // Fallback: if suggest/generate yielded no minds, pick from existing seed minds
+    if (!mindIds.length && allMinds.length) {
+      const topic = (bookContext?.[0]?.title || message || '').toLowerCase();
+      const words = topic.split(/\s+/).filter(w => w.length > 3);
+      const scored = allMinds.map(m => {
+        const hay = ((m.domain || '') + ' ' + (m.era || '') + ' ' + (m.name || '')).toLowerCase();
+        const score = words.reduce((s, w) => s + (hay.includes(w) ? 1 : 0), 0);
+        return { m, score };
+      });
+      scored.sort((a, b) => b.score - a.score || Math.random() - 0.5);
+      const pickCount = Math.min(2, scored.length);
+      for (let i = 0; i < pickCount; i++) {
+        const { m } = scored[i];
+        mindIds.push(m.id);
+        if (!activeMinds.has(m.id)) {
+          activeMinds.set(m.id, { id: m.id, name: m.name });
+          newJoinedNames.push(m.name);
+        }
+      }
+      console.info('[minds] Used fallback seed minds:', newJoinedNames.join(', '));
     }
 
     removeMindsLoading();
 
-    if (!mindIds.length) return;
+    if (!mindIds.length) {
+      console.warn('[minds] No minds available at all (no seed minds either). skipSuggest=', skipSuggest, 'hasMentions=', hasMentions);
+      return;
+    }
 
     const history = [];
     chatBox.querySelectorAll('.chat-message:not(#loading-msg):not(.minds-loading-notice)').forEach(el => {
@@ -2856,11 +2881,9 @@ async function sendBookChat(bookId, message) {
       removeLoading();
     }
 
-    if (activeMinds.size && mentionedNames.length) {
-      const book = allBooks.find(b => b.agentId === bookId);
-      const bookContext = book ? [{ title: book.title, author: book.author || '' }] : [];
-      _inviteMindsToChat(chatBox, message, bookContext, [bookId], mentionedNames);
-    }
+    const book = allBooks.find(b => b.agentId === bookId);
+    const bookContext = book ? [{ title: book.title, author: book.author || '' }] : [];
+    _inviteMindsToChat(chatBox, message, bookContext, [bookId], mentionedNames);
   } catch (err) {
     removeLoading();
     appendMsg(chatBox, 'assistant', 'Error: ' + err.message);
@@ -3398,7 +3421,12 @@ function mindColor(name) { let h = 0; for (let i = 0; i < name.length; i++) h = 
 function mindInitials(name) { return name.split(/\s+/).slice(0, 2).map(w => w[0].toUpperCase()).join(''); }
 
 async function loadMinds() {
-  try { allMinds = await api('/api/minds'); } catch { allMinds = []; }
+  try {
+    const minds = await api('/api/minds');
+    allMinds = minds;
+  } catch (err) {
+    console.error('[loadMinds] Failed to fetch minds:', err.message);
+  }
 }
 
 let _graphSim = null;
@@ -3407,6 +3435,39 @@ let _graphState = null;
 
 function _domainTokens(m) {
   return (m.domain || '').toLowerCase().split(/[,;\/&]+/).map(d => d.trim()).filter(Boolean);
+}
+
+const _STOP_WORDS = new Set(['and','the','of','in','a','an','to','for','on','with','its','or','as','by','at','is','was','are','be','has','had','that','this','from','but','not','it','he','she','they','his','her','their','our','my','all','no','so','if','do','did','will','can','may']);
+
+function _tokenWords(tokens) {
+  const words = new Set();
+  for (const t of tokens) {
+    for (const w of t.split(/\s+/)) {
+      const clean = w.replace(/[^a-z0-9]/g, '');
+      if (clean.length > 2 && !_STOP_WORDS.has(clean)) words.add(clean);
+    }
+  }
+  return words;
+}
+
+function _matchStrength(tokensA, tokensB) {
+  let strength = 0;
+  for (const t of tokensA) {
+    for (const u of tokensB) {
+      if (t === u) { strength += 3; }
+      else if (t.includes(u) || u.includes(t)) { strength += 2; }
+    }
+  }
+  if (strength === 0) {
+    const wordsA = _tokenWords(tokensA);
+    const wordsB = _tokenWords(tokensB);
+    let wordHits = 0;
+    for (const w of wordsA) {
+      if (wordsB.has(w)) wordHits++;
+    }
+    if (wordHits >= 2) strength = wordHits;
+  }
+  return strength;
 }
 
 function _buildGraphData(minds) {
@@ -3431,7 +3492,40 @@ function _buildGraphData(minds) {
     for (let i = 1; i < nodes.length; i++) {
       links.push({ source: nodes[0].id, target: nodes[i].id, strength: 0.3 });
     }
+  } else {
+    const linked = new Set();
+    for (const l of links) {
+      linked.add(typeof l.source === 'object' ? l.source.id : l.source);
+      linked.add(typeof l.target === 'object' ? l.target.id : l.target);
+    }
+    for (const orphan of nodes) {
+      if (linked.has(orphan.id)) continue;
+      let best = null, bestStr = 0;
+      for (const other of nodes) {
+        if (other === orphan) continue;
+        const s = _matchStrength(orphan.tokens, other.tokens);
+        if (s > bestStr) { bestStr = s; best = other; }
+      }
+      if (best) {
+        links.push({ source: orphan.id, target: best.id, strength: Math.min(bestStr, 2) });
+      }
+    }
   }
+  try {
+    const customs = JSON.parse(localStorage.getItem('feynman_custom_links') || '[]');
+    const nodeIds = new Set(nodes.map(n => n.id));
+    for (const c of customs) {
+      if (!nodeIds.has(c.s) || !nodeIds.has(c.t)) continue;
+      const exists = links.some(l => {
+        const sid = typeof l.source === 'object' ? l.source.id : l.source;
+        const tid = typeof l.target === 'object' ? l.target.id : l.target;
+        return (sid === c.s && tid === c.t) || (sid === c.t && tid === c.s);
+      });
+      if (!exists) {
+        links.push({ source: c.s, target: c.t, strength: 1 });
+      }
+    }
+  } catch (err) { console.warn('Failed to load custom links:', err); }
   return { nodes, links };
 }
 
@@ -3477,8 +3571,15 @@ function _renderMindsGraph() {
   ctx.scale(dpr, dpr);
 
   let transform = d3.zoomIdentity;
+  let _isOnNode = false;
   const zoomBehavior = d3.zoom()
     .scaleExtent([0.1, 6])
+    .filter((e) => {
+      if (e.type === 'wheel') return true;
+      if (e.type === 'dblclick') return true;
+      if (_isOnNode) return false;
+      return true;
+    })
     .on('zoom', (e) => { transform = e.transform; });
   d3.select(canvas).call(zoomBehavior);
 
@@ -3536,13 +3637,15 @@ function _renderMindsGraph() {
     ctx.scale(transform.k, transform.k);
 
     const matchIds = new Set();
-    if (state.highlightQuery) {
+    const hasQuery = !!state.highlightQuery;
+    if (hasQuery) {
       const q = state.highlightQuery.toLowerCase();
       nodes.forEach(n => {
         if (n.name.toLowerCase().includes(q)) matchIds.add(n.id);
       });
     }
-    const filtering = matchIds.size > 0;
+    const noMatch = hasQuery && matchIds.size === 0;
+    const filtering = hasQuery;
 
     for (const l of links) {
       const s = l.source, t = l.target;
@@ -3585,6 +3688,7 @@ function _renderMindsGraph() {
 
     for (const n of nodes) {
       if (n._isAdd) {
+        if (noMatch) continue;
         const hov = state.hoveredNode === n;
         const pulse = 1 + Math.sin(time.now * 0.003) * 0.08;
         const ar = ADD_R * pulse;
@@ -3731,6 +3835,17 @@ function _renderMindsGraph() {
         ctx.stroke();
       }
 
+      if (state._dragDropTarget === n) {
+        const pulseR = rr + 8 + Math.sin(time.now * 0.006) * 3;
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, pulseR, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(34,197,94,0.7)`;
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
       ctx.beginPath();
       ctx.arc(n.x, n.y, rr, 0, Math.PI * 2);
       ctx.fillStyle = dimmed ? `rgba(${cr},${cg},${cb},${nodeAlpha})` : n.color;
@@ -3758,6 +3873,47 @@ function _renderMindsGraph() {
     }
 
     ctx.restore();
+
+    if (noMatch) {
+      const dk = _isDarkMode();
+      const centerX = W / 2;
+      const centerY = H / 2;
+      const inviteText = `"${state.highlightQuery}" is not in the network yet`;
+      const btnText = '+ Invite to Network';
+
+      ctx.font = '500 15px "Libre Baskerville", Georgia, serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = dk ? 'rgba(245,245,247,0.85)' : 'rgba(30,35,50,0.85)';
+      ctx.fillText(inviteText, centerX, centerY - 20);
+
+      ctx.font = '600 14px Inter, sans-serif';
+      const btnW = ctx.measureText(btnText).width + 36;
+      const btnH = 38;
+      const btnX = centerX - btnW / 2;
+      const btnY = centerY + 10;
+
+      state._inviteBtnRect = { x: btnX, y: btnY, w: btnW, h: btnH };
+
+      const hov = state._inviteBtnHover;
+      ctx.beginPath();
+      ctx.roundRect(btnX, btnY, btnW, btnH, 10);
+      ctx.fillStyle = hov
+        ? (dk ? 'rgba(10,132,255,0.95)' : 'rgba(0,113,227,0.95)')
+        : (dk ? 'rgba(10,132,255,0.85)' : 'rgba(0,113,227,0.85)');
+      ctx.fill();
+      if (hov) {
+        ctx.shadowColor = 'rgba(0,113,227,0.3)';
+        ctx.shadowBlur = 12;
+      }
+      ctx.fillStyle = '#fff';
+      ctx.fillText(btnText, centerX, btnY + btnH / 2);
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+    } else {
+      state._inviteBtnRect = null;
+    }
+
     _graphAnim = requestAnimationFrame(draw);
   }
 
@@ -3799,15 +3955,32 @@ function _renderMindsGraph() {
       _newAt: performance.now(),
     };
     nodes.splice(nodes.length - 1, 0, newNode);
+    const scored = [];
     for (const existing of nodes) {
       if (existing._isAdd || existing === newNode) continue;
-      const shared = newNode.tokens.filter(t => existing.tokens.some(u => t === u || t.includes(u) || u.includes(t)));
-      if (shared.length > 0) {
-        const nl = { source: newNode, target: existing, strength: shared.length };
+      const strength = _matchStrength(newNode.tokens, existing.tokens);
+      if (strength > 0) scored.push({ node: existing, strength });
+    }
+    scored.sort((a, b) => b.strength - a.strength);
+    const topMatches = scored.slice(0, 5);
+    for (const { node: target, strength } of topMatches) {
+      const nl = { source: newNode, target, strength };
+      links.push(nl);
+      for (let p = 0, c = Math.max(1, Math.round(strength * 0.8)); p < c; p++) {
+        particles.push({ link: nl, t: Math.random(), speed: 0.001 + Math.random() * 0.003, size: 1 + Math.random() * 1.5, opacity: 0.3 + Math.random() * 0.5 });
+      }
+    }
+    if (!topMatches.length) {
+      const candidates = nodes.filter(d => !d._isAdd && d !== newNode);
+      candidates.sort((a, b) => {
+        const da = (a.x - newNode.x) ** 2 + (a.y - newNode.y) ** 2;
+        const db = (b.x - newNode.x) ** 2 + (b.y - newNode.y) ** 2;
+        return da - db;
+      });
+      for (const target of candidates.slice(0, 2)) {
+        const nl = { source: newNode, target, strength: 0.5 };
         links.push(nl);
-        for (let p = 0, c = Math.max(1, Math.round(shared.length * 1.5)); p < c; p++) {
-          particles.push({ link: nl, t: Math.random(), speed: 0.001 + Math.random() * 0.003, size: 1 + Math.random() * 1.5, opacity: 0.3 + Math.random() * 0.5 });
-        }
+        particles.push({ link: nl, t: Math.random(), speed: 0.001 + Math.random() * 0.002, size: 1 + Math.random(), opacity: 0.2 + Math.random() * 0.3 });
       }
     }
     sim.nodes(nodes);
@@ -3815,6 +3988,15 @@ function _renderMindsGraph() {
     sim.alpha(0.4).restart();
     return newNode;
   }
+
+  state._insertMindNode = _insertMindNode;
+  state._addNode = addNode;
+  state._zoomBehavior = zoomBehavior;
+  state._canvas = canvas;
+  state._W = W;
+  state._H = H;
+  state._transform = () => transform;
+  state._showTooltip = _showTooltip;
 
   async function _expandFromNode(node) {
     if (node._isAdd || _expandedSet.has(node.id)) return;
@@ -3900,7 +4082,7 @@ function _renderMindsGraph() {
     if (n._isAdd) {
       tooltip.innerHTML = `
         <div class="tt-name">Expand the Network</div>
-        <div class="tt-bio">Click to invite new great minds and grow the network.</div>
+        <div class="tt-bio">Invite great minds from the Noosphere to join your intellectual network.</div>
         <div class="tt-action">Click to expand →</div>`;
     } else {
       const domains = n.tokens.map(t => `<span class="tt-domain-tag">${t}</span>`).join('');
@@ -3966,7 +4148,15 @@ function _renderMindsGraph() {
     mouseWorld = transform.invert([cx, cy]);
     const n = _getNodeAt(cx, cy);
     state.hoveredNode = n;
-    canvas.style.cursor = n ? 'pointer' : 'grab';
+
+    let onInviteBtn = false;
+    if (state._inviteBtnRect) {
+      const b = state._inviteBtnRect;
+      onInviteBtn = cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h;
+    }
+    state._inviteBtnHover = onInviteBtn;
+    _isOnNode = !!n && !n._isAdd;
+    canvas.style.cursor = (n || onInviteBtn) ? 'pointer' : 'grab';
 
     if (n) {
       _showTooltip(n, cx, cy);
@@ -3977,7 +4167,16 @@ function _renderMindsGraph() {
 
   canvas.addEventListener('click', async (e) => {
     const rect = canvas.getBoundingClientRect();
-    const n = _getNodeAt(e.clientX - rect.left, e.clientY - rect.top);
+    const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+    if (state._inviteBtnRect) {
+      const b = state._inviteBtnRect;
+      if (cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h) {
+        if (!isProUser()) { showProOverlay(); return; }
+        showAddMindDialog(state.highlightQuery);
+        return;
+      }
+    }
+    const n = _getNodeAt(cx, cy);
     if (!n) return;
     if (n._isAdd) {
       if (!isProUser()) { showProOverlay(); return; }
@@ -4020,6 +4219,8 @@ function _renderMindsGraph() {
     _hideTooltip();
   });
 
+  let _dragStartPos = null;
+
   d3.select(canvas).call(
     d3.drag()
       .subject((e) => {
@@ -4033,6 +4234,7 @@ function _renderMindsGraph() {
       .on('start', (e) => {
         if (!e.subject) return;
         if (!e.active) sim.alphaTarget(0.3).restart();
+        _dragStartPos = { x: e.subject.x, y: e.subject.y };
         e.subject.fx = e.subject.x;
         e.subject.fy = e.subject.y;
       })
@@ -4041,14 +4243,71 @@ function _renderMindsGraph() {
         const [mx, my] = transform.invert([e.x, e.y]);
         e.subject.fx = mx;
         e.subject.fy = my;
+
+        state._dragDropTarget = null;
+        if (!e.subject._isAdd) {
+          let closest = null, closestDist = Infinity;
+          for (const n of nodes) {
+            if (n === e.subject || n._isAdd) continue;
+            const dx = n.x - mx, dy = n.y - my;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < BASE_R * 3 && dist < closestDist) {
+              closestDist = dist;
+              closest = n;
+            }
+          }
+          state._dragDropTarget = closest;
+        }
       })
       .on('end', (e) => {
         if (!e.subject) return;
         if (!e.active) sim.alphaTarget(0);
+        const dragged = e.subject;
+        const dropTarget = state._dragDropTarget;
+        state._dragDropTarget = null;
         e.subject.fx = null;
         e.subject.fy = null;
+
+        if (dropTarget && !dragged._isAdd && _dragStartPos) {
+          const movedDist = Math.sqrt(
+            (dragged.x - _dragStartPos.x) ** 2 + (dragged.y - _dragStartPos.y) ** 2
+          );
+          if (movedDist > BASE_R * 2) {
+            const alreadyLinked = links.some(l => {
+              const sid = typeof l.source === 'object' ? l.source.id : l.source;
+              const tid = typeof l.target === 'object' ? l.target.id : l.target;
+              return (sid === dragged.id && tid === dropTarget.id) ||
+                     (sid === dropTarget.id && tid === dragged.id);
+            });
+            if (!alreadyLinked) {
+              const nl = { source: dragged, target: dropTarget, strength: 1 };
+              links.push(nl);
+              particles.push({ link: nl, t: Math.random(), speed: 0.001 + Math.random() * 0.003, size: 1.5, opacity: 0.4 });
+              sim.force('link').links(links);
+              sim.alpha(0.3).restart();
+              _saveCustomLink(dragged.id, dropTarget.id);
+              showToast(`Connected ${dragged.name} ↔ ${dropTarget.name}`);
+            }
+          }
+        }
+        _dragStartPos = null;
       })
   );
+
+  function _saveCustomLink(sourceId, targetId) {
+    try {
+      const customs = JSON.parse(localStorage.getItem('feynman_custom_links') || '[]');
+      const key = [sourceId, targetId].sort();
+      const already = customs.some(c => {
+        const ck = [c.s, c.t].sort();
+        return ck[0] === key[0] && ck[1] === key[1];
+      });
+      if (!already) {
+        customs.push({ s: key[0], t: key[1] });
+        localStorage.setItem('feynman_custom_links', JSON.stringify(customs));
+      }
+    } catch (err) { console.warn('Failed to save custom link:', err); }
+  }
 }
 
 function _applyGraphHighlight(query) {
@@ -4198,20 +4457,47 @@ function _saveMindSession(chatBox) {
   _mindSaving = false;
 }
 
-function showAddMindDialog() {
+function showAddMindDialog(prefillName) {
   const overlay = document.createElement('div');
   overlay.className = 'mind-add-dialog';
   overlay.innerHTML = `
-    <div class="mind-add-form">
-      <h3>Expand the Network</h3>
-      <input type="text" id="add-mind-name" placeholder="Name (e.g., Socrates, Ada Lovelace)" autocomplete="off" />
+    <div class="mind-add-form mind-add-form-rich">
+      <div class="mind-add-header">
+        <div class="mind-add-neural">
+          <svg width="64" height="40" viewBox="0 0 64 40" fill="none">
+            <line x1="10" y1="10" x2="32" y2="6" stroke="var(--accent)" stroke-width="1" opacity="0.3"/>
+            <line x1="10" y1="30" x2="32" y2="6" stroke="var(--accent)" stroke-width="1" opacity="0.2"/>
+            <line x1="10" y1="10" x2="32" y2="20" stroke="var(--accent)" stroke-width="1" opacity="0.25"/>
+            <line x1="10" y1="30" x2="32" y2="20" stroke="var(--accent)" stroke-width="1" opacity="0.3"/>
+            <line x1="10" y1="10" x2="32" y2="34" stroke="var(--accent)" stroke-width="1" opacity="0.15"/>
+            <line x1="10" y1="30" x2="32" y2="34" stroke="var(--accent)" stroke-width="1" opacity="0.25"/>
+            <line x1="32" y1="6" x2="54" y2="14" stroke="var(--accent)" stroke-width="1" opacity="0.3"/>
+            <line x1="32" y1="20" x2="54" y2="14" stroke="var(--accent)" stroke-width="1" opacity="0.25"/>
+            <line x1="32" y1="6" x2="54" y2="28" stroke="var(--accent)" stroke-width="1" opacity="0.2"/>
+            <line x1="32" y1="20" x2="54" y2="28" stroke="var(--accent)" stroke-width="1" opacity="0.3"/>
+            <line x1="32" y1="34" x2="54" y2="28" stroke="var(--accent)" stroke-width="1" opacity="0.25"/>
+            <line x1="32" y1="34" x2="54" y2="14" stroke="var(--accent)" stroke-width="1" opacity="0.15"/>
+            <circle cx="10" cy="10" r="3.5" fill="var(--accent)" opacity="0.7"/>
+            <circle cx="10" cy="30" r="3.5" fill="var(--accent)" opacity="0.7"/>
+            <circle cx="32" cy="6" r="4" fill="var(--accent)" opacity="0.85"/>
+            <circle cx="32" cy="20" r="4.5" fill="var(--accent)" opacity="1"/>
+            <circle cx="32" cy="34" r="4" fill="var(--accent)" opacity="0.85"/>
+            <circle cx="54" cy="14" r="3.5" fill="var(--accent)" opacity="0.7"/>
+            <circle cx="54" cy="28" r="3.5" fill="var(--accent)" opacity="0.7"/>
+          </svg>
+        </div>
+        <h3>Expand the Network</h3>
+        <p class="mind-add-desc">Invite a great mind from the <strong>Noosphere</strong> — the realm of humanity's collective wisdom.</p>
+      </div>
+      <input type="text" id="add-mind-name" placeholder="e.g. Socrates, Ada Lovelace, Zhuang Zhou..." autocomplete="off" />
       <div class="mind-add-actions">
         <button id="add-mind-cancel">Cancel</button>
-        <button id="add-mind-submit" class="primary-btn">Generate</button>
+        <button id="add-mind-submit" class="primary-btn">Invite</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
   const nameInput = overlay.querySelector('#add-mind-name');
+  if (prefillName) nameInput.value = prefillName;
   nameInput.focus();
   overlay.querySelector('#add-mind-cancel').addEventListener('click', () => overlay.remove());
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
@@ -4219,25 +4505,73 @@ function showAddMindDialog() {
     const name = nameInput.value.trim();
     if (!name) return;
     const btn = overlay.querySelector('#add-mind-submit');
-    btn.textContent = 'Generating...';
+    btn.textContent = 'Inviting...';
     btn.disabled = true;
     try {
-      await api('/api/minds/generate', {
+      const mind = await api('/api/minds/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
       });
       overlay.remove();
-      await loadMinds();
-      if (getRoute().page === 'minds') _renderMindsGraph();
+      const searchInput = document.getElementById('minds-search');
+      if (searchInput) { searchInput.value = ''; _applyGraphHighlight(''); }
+      if (!allMinds.some(m => m.id === mind.id)) allMinds.push(mind);
+      if (getRoute().page === 'minds' && _graphState && _graphState._insertMindNode) {
+        const nearNode = _graphState._addNode || _graphState.nodes[0];
+        const newNode = _graphState._insertMindNode(mind, nearNode);
+        _panToNewMind(newNode);
+        setTimeout(() => {
+          if (_graphState && _graphState._showTooltip && newNode) {
+            const t = _graphState._transform();
+            const sx = t.applyX(newNode.x);
+            const sy = t.applyY(newNode.y);
+            _graphState._showTooltip(newNode, sx, sy);
+          }
+        }, 900);
+        setTimeout(() => {
+          const tooltip = document.getElementById('minds-tooltip');
+          if (tooltip && !tooltip.classList.contains('hidden')) {
+            tooltip.style.transition = 'opacity 0.6s ease';
+            tooltip.style.opacity = '0';
+            setTimeout(() => {
+              tooltip.style.opacity = '';
+              tooltip.style.transition = '';
+              tooltip.classList.add('hidden');
+            }, 600);
+          }
+        }, 6000);
+      } else {
+        await loadMinds();
+        if (getRoute().page === 'minds') _renderMindsGraph();
+      }
     } catch (err) {
-      btn.textContent = 'Generate';
+      btn.textContent = 'Invite';
       btn.disabled = false;
       alert('Failed: ' + err.message);
     }
   };
   overlay.querySelector('#add-mind-submit').addEventListener('click', submit);
   nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
+}
+
+function _panToNewMind(newNode) {
+  if (!_graphState) return;
+  const s = _graphState;
+  const canvas = s._canvas;
+  const W = s._W;
+  const H = s._H;
+  const zoomBehavior = s._zoomBehavior;
+  if (!canvas || !zoomBehavior) return;
+  setTimeout(() => {
+    const targetK = Math.min(s._transform().k, 1.5);
+    const tx = W / 2 - newNode.x * targetK;
+    const ty = H / 2 - newNode.y * targetK;
+    d3.select(canvas).transition().duration(1000).ease(d3.easeCubicInOut).call(
+      zoomBehavior.transform,
+      d3.zoomIdentity.translate(tx, ty).scale(targetK)
+    );
+  }, 300);
 }
 
 function showCreateMindDialog() {
