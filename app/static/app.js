@@ -4428,32 +4428,35 @@ function _renderMindsGraph() {
         const dragged = e.subject;
         const dropTarget = state._dragDropTarget;
         state._dragDropTarget = null;
-        e.subject.fx = null;
-        e.subject.fy = null;
 
         if (dropTarget && !dragged._isAdd && _dragStartPos) {
-          const movedDist = Math.sqrt(
-            (dragged.x - _dragStartPos.x) ** 2 + (dragged.y - _dragStartPos.y) ** 2
-          );
-          if (movedDist > BASE_R) {
-            const alreadyLinked = links.some(l => {
+          const alreadyLinked = links.some(l => {
+            const sid = typeof l.source === 'object' ? l.source.id : l.source;
+            const tid = typeof l.target === 'object' ? l.target.id : l.target;
+            return (sid === dragged.id && tid === dropTarget.id) ||
+                   (sid === dropTarget.id && tid === dragged.id);
+          });
+          if (!alreadyLinked) {
+            const nl = { source: dragged, target: dropTarget, strength: 1 };
+            links.push(nl);
+            particles.push({ link: nl, t: Math.random(), speed: 0.001 + Math.random() * 0.003, size: 1.5, opacity: 0.4 });
+            sim.force('link').links(links);
+            sim.alpha(0.3).restart();
+            _saveCustomLink(dragged.id, dropTarget.id);
+            showToast(`Connected ${dragged.name} ↔ ${dropTarget.name}`);
+            _triggerConnectFlash(dragged, dropTarget, nl);
+          } else {
+            _triggerConnectFlash(dragged, dropTarget, links.find(l => {
               const sid = typeof l.source === 'object' ? l.source.id : l.source;
               const tid = typeof l.target === 'object' ? l.target.id : l.target;
               return (sid === dragged.id && tid === dropTarget.id) ||
                      (sid === dropTarget.id && tid === dragged.id);
-            });
-            if (!alreadyLinked) {
-              const nl = { source: dragged, target: dropTarget, strength: 1 };
-              links.push(nl);
-              particles.push({ link: nl, t: Math.random(), speed: 0.001 + Math.random() * 0.003, size: 1.5, opacity: 0.4 });
-              sim.force('link').links(links);
-              sim.alpha(0.3).restart();
-              _saveCustomLink(dragged.id, dropTarget.id);
-              showToast(`Connected ${dragged.name} ↔ ${dropTarget.name}`);
-              _triggerConnectFlash(dragged, dropTarget, nl);
-            }
+            }));
           }
         }
+
+        e.subject.fx = null;
+        e.subject.fy = null;
         _dragStartPos = null;
       })
   );
