@@ -3622,6 +3622,7 @@ function _renderMindsGraph() {
   let _isDraggingNode = false;
   let _draggedNode = null;
   let _dragStartPos = null;
+  let _suppressClick = false;
   const zoomBehavior = d3.zoom()
     .scaleExtent([0.1, 6])
     .filter((e) => {
@@ -3714,6 +3715,7 @@ function _renderMindsGraph() {
     _draggedNode = null;
     _isDraggingNode = false;
     _dragStartPos = null;
+    _suppressClick = true;
     sim.alphaTarget(0);
   });
 
@@ -4405,6 +4407,7 @@ function _renderMindsGraph() {
   });
 
   canvas.addEventListener('click', async (e) => {
+    if (_suppressClick) { _suppressClick = false; return; }
     const rect = canvas.getBoundingClientRect();
     const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
     if (state._inviteBtnRect) {
