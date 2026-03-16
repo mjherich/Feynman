@@ -419,7 +419,7 @@ body {
 .app-main {
   flex: 1; min-width: 0;
   display: flex; flex-direction: column;
-  overflow: hidden;
+  overflow: hidden; position: relative;
 }
 
 /* ═══════════════════════════════════════
@@ -631,6 +631,61 @@ body {
 .home-status {
   margin-top: 8px; font-size: 13px; color: var(--accent);
   min-height: 20px; text-align: center;
+}
+
+/* ─── Upload Toast ─── */
+.upload-toast {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%) translateY(-20px);
+  z-index: 500; display: flex; align-items: center; gap: 10px;
+  padding: 12px 28px; border-radius: 14px;
+  width: max-content; min-width: 280px; max-width: 460px;
+  background: rgba(245,245,247,0.72);
+  backdrop-filter: blur(24px) saturate(1.5); -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  border: 1px solid rgba(0,0,0,0.06);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.04);
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.upload-toast.visible {
+  opacity: 1; pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+.upload-toast.hiding {
+  opacity: 0; transform: translateX(-50%) translateY(-12px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) .upload-toast {
+    background: rgba(40,40,46,0.5);
+    border-color: rgba(255,255,255,0.1);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.2);
+  }
+}
+:root.dark .upload-toast {
+  background: rgba(40,40,46,0.5);
+  border-color: rgba(255,255,255,0.1);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.2);
+}
+.upload-toast-spinner {
+  width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0;
+  border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-top-color: var(--accent);
+  animation: toast-spin 0.7s linear infinite;
+}
+.upload-toast.success .upload-toast-spinner,
+.upload-toast.error .upload-toast-spinner { animation: none; border: none; }
+.upload-toast.success .upload-toast-spinner::after,
+.upload-toast.error .upload-toast-spinner::after {
+  display: block; text-align: center; line-height: 16px; font-size: 14px;
+}
+.upload-toast.success .upload-toast-spinner { color: #27ae60; }
+.upload-toast.success .upload-toast-spinner::after { content: "\2713"; }
+.upload-toast.error .upload-toast-spinner { color: #e74c3c; }
+.upload-toast.error .upload-toast-spinner::after { content: "\2715"; }
+@keyframes toast-spin { to { transform: rotate(360deg); } }
+.upload-toast-text {
+  font-size: 13px; font-weight: 500; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 380px;
 }
 
 /* ─── Onboarding ─── */
@@ -1446,21 +1501,29 @@ body {
   font-size: 12px; background: transparent;
 }
 .topic-tag-clear:hover { color: var(--accent); }
-
-/* Discover button */
-.discover-btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 7px 16px; border-radius: 999px;
-  border: 1px solid var(--accent);
-  background: transparent; color: var(--accent);
-  font-weight: 500; font-size: 13px; cursor: pointer;
-  font-family: inherit; transition: all 0.18s;
+/* Discover bar — between topic tags and book grid */
+.library-discover-bar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px;
+  margin-bottom: 20px;
+  border-radius: 10px;
+  background: var(--accent-light);
+  border: 1px solid color-mix(in srgb, var(--accent) 15%, transparent);
+}
+.library-discover-bar.hidden { display: none !important; }
+.discover-bar-text {
+  font-size: 13px; color: var(--text-secondary); flex: 1;
+}
+.discover-bar-text strong { color: var(--text); font-weight: 600; }
+.discover-bar-btn {
+  padding: 6px 16px; border-radius: 999px; border: none;
+  background: var(--accent); color: #fff;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  font-family: inherit; transition: opacity 0.15s;
   white-space: nowrap;
 }
-.discover-btn:hover {
-  background: var(--accent); color: #fff;
-}
-.discover-btn svg { flex-shrink: 0; }
+.discover-bar-btn:hover { opacity: 0.85; }
+.discover-bar-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Discover more card */
 .discover-more-card { border-style: dashed; opacity: 0.7; }

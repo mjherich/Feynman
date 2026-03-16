@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 from . import config
+
+log = logging.getLogger(__name__)
 
 
 class ProviderError(RuntimeError):
@@ -138,20 +142,50 @@ class GeminiProvider(BaseProvider):
     def embed_texts(self, texts: list[str], task_type: str | None = None) -> list[list[float]]:
         task_type = task_type or "RETRIEVAL_DOCUMENT"
         path = f"/models/{self.embed_model}:batchEmbedContents"
-        requests = [
-            {
-                "model": f"models/{self.embed_model}",
-                "content": {"parts": [{"text": text}]},
-                "taskType": task_type,
-            }
-            for text in texts
-        ]
-        payload = {"requests": requests}
-        data = self._post(path, payload)
-        embeddings = []
-        for item in data.get("embeddings", []):
-            embeddings.append(item.get("values", []))
-        return embeddings
+        _BATCH_LIMIT = 100
+        _RPM_LIMIT = 95
+        _MAX_RETRIES = 5
+        all_embeddings: list[list[float]] = []
+        total_batches = (len(texts) + _BATCH_LIMIT - 1) // _BATCH_LIMIT
+        sent_this_window = 0
+        window_start = time.monotonic()
+        for batch_idx, i in enumerate(range(0, len(texts), _BATCH_LIMIT)):
+            batch = texts[i : i + _BATCH_LIMIT]
+
+            if sent_this_window + len(batch) > _RPM_LIMIT:
+                elapsed = time.monotonic() - window_start
+                if elapsed < 60:
+                    wait = 61 - elapsed
+                    log.info("Embedding rate-limit pause: %.0fs before batch %d/%d", wait, batch_idx + 1, total_batches)
+                    time.sleep(wait)
+                sent_this_window = 0
+                window_start = time.monotonic()
+
+            requests = [
+                {
+                    "model": f"models/{self.embed_model}",
+                    "content": {"parts": [{"text": text}]},
+                    "taskType": task_type,
+                }
+                for text in batch
+            ]
+            for attempt in range(_MAX_RETRIES + 1):
+                try:
+                    data = self._post(path, {"requests": requests})
+                    break
+                except ProviderError as exc:
+                    if "429" in str(exc) and attempt < _MAX_RETRIES:
+                        wait = min(30, 10 * (attempt + 1))
+                        log.warning("Gemini 429 on batch %d/%d, retry in %ds...", batch_idx + 1, total_batches, wait)
+                        time.sleep(wait)
+                        sent_this_window = 0
+                        window_start = time.monotonic()
+                    else:
+                        raise
+            sent_this_window += len(batch)
+            for item in data.get("embeddings", []):
+                all_embeddings.append(item.get("values", []))
+        return all_embeddings
 
     def chat(self, system: str, user: str, history: list[dict[str, str]] | None = None, use_grounding: bool = False) -> ChatResult:
         parts: list[dict[str, str]] = []

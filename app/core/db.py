@@ -777,6 +777,18 @@ def find_agent_by_name(name: str) -> dict[str, Any] | None:
         return _row_to_agent(row)
 
 
+def find_existing_upload(name: str) -> dict[str, Any] | None:
+    """Find a non-deleted, non-error upload/topic agent by name (case-insensitive)."""
+    with get_conn() as conn:
+        row = _fetchone(conn, _q(
+            "SELECT * FROM agents WHERE LOWER(name) = LOWER(?) "
+            "AND is_deleted = ? AND status != 'error'"
+        ), (name, False if _USE_PG else 0))
+        if not row:
+            return None
+        return _row_to_agent(row)
+
+
 def create_catalog_agent(title: str, author: str = "", isbn: str | None = None,
                          category: str = "", description: str = "") -> str:
     """Create a new catalog agent for a dynamically discovered book. Returns agent_id."""
@@ -1119,6 +1131,16 @@ def count_usage_today(user_id: str, action: str) -> int:
             WHERE user_id = ? AND action = ?
             AND created_at >= CURRENT_DATE
         """), (user_id, action))
+        return row["cnt"] if row else 0
+
+
+def count_user_uploads(user_id: str) -> int:
+    """Count non-deleted upload/topic agents owned by a user."""
+    with get_conn() as conn:
+        row = _fetchone(conn, _q("""
+            SELECT COUNT(*) as cnt FROM agents
+            WHERE user_id = ? AND is_deleted = ? AND type IN ('upload', 'topic')
+        """), (user_id, False if _USE_PG else 0))
         return row["cnt"] if row else 0
 
 

@@ -12,7 +12,7 @@ let agents = [];
 let votes = [];
 let allBooks = [];
 let currentBookId = null;
-let libraryFilter = 'all';
+let libraryFilter = 'recent';
 let librarySearch = '';
 let pollTimer = null;
 
@@ -339,10 +339,11 @@ function renderSubscriptionPage() {
       'Four-layer answers: text, metadata, web, LLM',
       'Great minds join once per chat',
       'Discover books & topics (3/day)',
-      'Upload your own books (PDF / EPUB / TXT / MD)',
+      'Upload up to 3 books (PDF / EPUB / TXT / MD)',
     ];
     const proFeatures = [
       'Everything in Free',
+      'Upload more books',
       'Discover more books in chat & library',
       'Great minds continuously join chats',
       'Invite great minds into your chats',
@@ -446,10 +447,11 @@ function showProOverlay() {
       'Four-layer answers: text, metadata, web, LLM',
       'Great minds join once per chat',
       'Discover books & topics (3/day)',
-      'Upload your own books (PDF / EPUB / TXT / MD)',
+      'Upload up to 3 books (PDF / EPUB / TXT / MD)',
     ];
     const proFeatures = [
       'Everything in Free',
+      'Upload more books',
       'Discover more books in chat & library',
       'Great minds continuously join chats',
       'Invite great minds into your chats',
@@ -1544,7 +1546,7 @@ async function api(path, opts = {}) {
   let r = await fetch(path, opts);
   let d;
   try { d = await r.json(); } catch { d = { detail: r.statusText || 'Request failed' }; }
-  if (r.status === 429 && d.detail?.code === 'quota_exceeded') {
+  if (r.status === 429 && (d.detail?.code === 'quota_exceeded' || d.detail?.code === 'upload_limit_reached')) {
     showProOverlay();
     throw new Error(d.detail.message || 'Quota exceeded');
   }
@@ -1614,6 +1616,25 @@ function renderTopicTags() {
       renderLibraryGrid();
     });
   }
+  renderDiscoverBar();
+}
+
+function renderDiscoverBar() {
+  const bar = document.getElementById('library-discover-bar');
+  if (!bar) return;
+  if (!activeTopics.size || librarySearch) {
+    bar.classList.add('hidden');
+    bar.innerHTML = '';
+    return;
+  }
+  const topicList = [...activeTopics];
+  const label = topicList.length === 1 ? topicList[0] : topicList.join(', ');
+  bar.classList.remove('hidden');
+  bar.innerHTML = `<span class="discover-bar-text">Want more books on <strong>${esc(label)}</strong>?</span>` +
+    `<button class="discover-bar-btn" id="discover-bar-btn">+ Discover 1–3 more</button>`;
+  document.getElementById('discover-bar-btn').addEventListener('click', () => {
+    discoverMore(topicList);
+  });
 }
 
 function handleTopicClick(topic) {
@@ -1629,7 +1650,7 @@ function handleTopicClick(topic) {
 
 // ─── Build book list from agents (DB is the single source of truth) ───
 function buildBookList() {
-  allBooks = agents.map(a => {
+  allBooks = agents.filter(a => a.status !== 'error').map(a => {
     const meta = a.meta || {};
     return {
       id: a.id,                // agent ID is the book ID
@@ -2702,10 +2723,12 @@ window.selectBookFromSidebar = selectBookFromSidebar;
 function renderLibrary() { renderTopicTags(); renderLibraryGrid(); }
 
 function renderLibraryGrid() {
+  renderDiscoverBar();
   const c = document.getElementById('library-grid');
   let filtered = [...allBooks];
   if (libraryFilter === 'available') filtered = filtered.filter(b => b.available);
   else if (libraryFilter === 'recent') filtered.sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
+  else filtered.sort((a,b) => a.title.localeCompare(b.title));
   if (activeTopics.size) {
     const topics = new Set([...activeTopics].map(t => t.toLowerCase()));
     filtered = filtered.filter(b => topics.has((b.category || '').toLowerCase()));
@@ -2722,27 +2745,13 @@ function renderLibraryGrid() {
   if (librarySearch && librarySearch.length >= 2 && !filtered.length) {
     if (_searchingQuery) {
       c.innerHTML = `<div class="search-discover-prompt" id="search-discover-prompt">
-        <span class="loading-dot">Searching for "${esc(librarySearch)}"...</span>
+        <span class="loading-dot">Looking up "${esc(librarySearch)}" — will add it if found...</span>
       </div>`;
     } else {
-      c.innerHTML = `<div class="search-discover-prompt"><p style="color:var(--text-muted)">No results for "${esc(librarySearch)}"</p></div>`;
+      c.innerHTML = `<div class="search-discover-prompt"><p style="color:var(--text-muted)">Couldn't find "${esc(librarySearch)}" — try a different title or author</p></div>`;
     }
   }
-  // Show "Discover more" card when topic filters are active
-  if (activeTopics.size && !librarySearch) {
-    const topics = [...activeTopics];
-    const label = topics.length === 1 ? topics[0] : 'these topics';
-    c.insertAdjacentHTML('beforeend',
-      `<div class="book-card discover-more-card" id="discover-more-card">
-        <div class="card-cover-gen" style="background:var(--bg-sidebar)">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        </div>
-        <div class="card-body"><h3 class="card-title" style="color:var(--text-muted)">Discover more</h3><p class="card-author">${esc(label)}</p></div>
-      </div>`);
-    document.getElementById('discover-more-card').addEventListener('click', () => {
-      discoverMore(topics);
-    });
-  }
+  
   // Show token usage for search/discover inline
   if (_searchUsage && _searchUsage.total_tokens > 0) {
     c.insertAdjacentHTML('beforeend',
@@ -2751,19 +2760,20 @@ function renderLibraryGrid() {
 }
 
 async function discoverMore(topics) {
-  const card = document.getElementById('discover-more-card');
-  if (card) card.innerHTML = '<div class="card-cover-gen" style="background:var(--bg-sidebar)"><span class="loading-dot">...</span></div><div class="card-body"><h3 class="card-title" style="color:var(--text-muted)">Discovering...</h3></div>';
   for (const topic of topics) {
     loadingTopics.add(topic);
   }
   renderTopicTags();
+  const barBtn = document.getElementById('discover-bar-btn');
+  if (barBtn) { barBtn.textContent = 'Discovering...'; barBtn.disabled = true; }
   try {
     let totalTokens = 0;
     for (const topic of topics) {
+      const count = Math.floor(Math.random() * 3) + 1;
       const data = await api('/api/discover', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic }),
+        body: JSON.stringify({ topic, count }),
       });
       if (data.usage?.total_tokens) totalTokens += data.usage.total_tokens;
     }
@@ -2938,46 +2948,91 @@ async function sendBookChat(bookId, message) {
   }
 }
 
+// ─── Upload Toast ───
+let _uploadToastTimer = null;
+
+function showUploadBanner(text, _unused, { mode = 'progress' } = {}) {
+  const el = document.getElementById('upload-toast');
+  const txt = document.getElementById('upload-toast-text');
+  if (_uploadToastTimer) { clearTimeout(_uploadToastTimer); _uploadToastTimer = null; }
+  el.classList.remove('hiding', 'success', 'error');
+  txt.textContent = text;
+  if (mode === 'success') el.classList.add('success');
+  else if (mode === 'error') el.classList.add('error');
+  el.classList.add('visible');
+}
+
+function hideUploadBanner(delay = 0) {
+  const el = document.getElementById('upload-toast');
+  const dismiss = () => {
+    el.classList.add('hiding');
+    setTimeout(() => el.classList.remove('visible', 'hiding', 'success', 'error'), 350);
+  };
+  if (delay > 0) { _uploadToastTimer = setTimeout(dismiss, delay); }
+  else { dismiss(); }
+}
+
 // ─── Upload (multi-file) — auto-selects uploaded books as chips ───
 const MAX_UPLOAD_SIZE_MB = 4;
-async function handleFileUpload(files, statusElId) {
-  const statusEl = statusElId ? document.getElementById(statusElId) : null;
+async function handleFileUpload(files) {
   const fileList = Array.from(files);
   let uploaded = 0;
   const uploadedAgentIds = [];
+  const duplicateNames = [];
 
   for (const file of fileList) {
     if (file.size > MAX_UPLOAD_SIZE_MB * 1024 * 1024) {
       const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
-      if (statusEl) statusEl.textContent = `"${file.name}" is too large (${sizeMB} MB). Maximum file size is ${MAX_UPLOAD_SIZE_MB} MB.`;
+      showUploadBanner(`File too large (${sizeMB} MB, limit ${MAX_UPLOAD_SIZE_MB} MB)`, null, { mode: 'error' });
+      hideUploadBanner(5000);
       return;
     }
-    if (statusEl) statusEl.textContent = `Uploading "${file.name}"${fileList.length > 1 ? ` (${uploaded+1}/${fileList.length})` : ''}...`;
+    const countLabel = fileList.length > 1 ? ` (${uploaded + 1}/${fileList.length})` : '';
+    showUploadBanner(`Uploading "${file.name}"${countLabel}...`, null, { mode: 'progress' });
     const fd = new FormData();
     fd.append('file', file);
     try {
       const result = await api('/api/agents/upload', { method: 'POST', body: fd });
       uploadedAgentIds.push(result.id);
-      uploaded++;
+      if (result.duplicate) {
+        duplicateNames.push(result.name || file.name);
+      } else {
+        uploaded++;
+      }
     } catch (err) {
-      if (statusEl) statusEl.textContent = `Error uploading "${file.name}": ${err.message}`;
+      if (err.message && err.message.includes('Upload limit reached')) {
+        showUploadBanner(err.message, null, { mode: 'error' });
+        hideUploadBanner(6000);
+        return;
+      }
+      showUploadBanner(`Upload failed: ${err.message}`, null, { mode: 'error' });
+      hideUploadBanner(5000);
       return;
     }
   }
 
-  if (statusEl) statusEl.textContent = uploaded > 1 ? `${uploaded} books uploaded — indexing...` : `"${fileList[0].name}" uploaded — indexing...`;
+  if (duplicateNames.length && uploaded === 0) {
+    const names = duplicateNames.map(n => `"${n}"`).join(', ');
+    showUploadBanner(`${names} already exists in the library — selected for you`, null, { mode: 'success' });
+    hideUploadBanner(5000);
+  } else if (duplicateNames.length) {
+    const dupNames = duplicateNames.map(n => `"${n}"`).join(', ');
+    showUploadBanner(`${uploaded} new book(s) uploaded — indexing... (${dupNames} already existed)`, null, { mode: 'success' });
+    hideUploadBanner(5000);
+  } else {
+    const name = uploaded > 1 ? `${uploaded} books` : `"${fileList[0].name}"`;
+    showUploadBanner(`${name} uploaded — indexing...`, null, { mode: 'success' });
+    hideUploadBanner(4000);
+  }
 
   await loadAgents();
   ensurePolling();
 
-  // Auto-select uploaded books as chips
   for (const agentId of uploadedAgentIds) {
     const book = allBooks.find(b => b.agentId === agentId);
     if (book) selectedBooks.set(book.id, book);
   }
   renderSelectedChips();
-
-  setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 5000);
 }
 
 // ─── Upvote ───
@@ -4970,7 +5025,7 @@ async function init() {
   const uploadInput = document.getElementById('upload-file-input');
   uploadBtn.addEventListener('click', e => { e.stopPropagation(); togglePopover('home-popover', 'home-popover-book-list', 'home-popover-no-books'); });
   document.getElementById('home-popover-upload').addEventListener('click', () => { closeAllPopovers(); uploadInput.click(); });
-  uploadInput.addEventListener('change', () => { if (uploadInput.files.length) { handleFileUpload(uploadInput.files, 'home-upload-status'); uploadInput.value = ''; } });
+  uploadInput.addEventListener('change', () => { if (uploadInput.files.length) { handleFileUpload(uploadInput.files); uploadInput.value = ''; } });
 
   // Home minds button → minds popover
   document.getElementById('home-minds-btn').addEventListener('click', e => {
@@ -4990,7 +5045,7 @@ async function init() {
   const chatUploadInput = document.getElementById('chat-upload-file-input');
   chatPlusBtn.addEventListener('click', e => { e.stopPropagation(); togglePopover('chat-popover', 'popover-book-list', 'popover-no-books'); });
   document.getElementById('popover-upload-action').addEventListener('click', () => { closeAllPopovers(); chatUploadInput.click(); });
-  chatUploadInput.addEventListener('change', () => { if (chatUploadInput.files.length) { handleFileUpload(chatUploadInput.files, null); chatUploadInput.value = ''; } });
+  chatUploadInput.addEventListener('change', () => { if (chatUploadInput.files.length) { handleFileUpload(chatUploadInput.files); chatUploadInput.value = ''; } });
 
   // Chat minds button → minds popover
   document.getElementById('chat-minds-btn').addEventListener('click', e => {
@@ -5046,20 +5101,6 @@ async function init() {
       }
       renderLibraryGrid();
     });
-  });
-
-  // Discover button
-  document.getElementById('discover-books-btn').addEventListener('click', () => {
-    if (activeTopics.size) {
-      discoverMore([...activeTopics]);
-    } else {
-      const pick = topicTags[Math.floor(Math.random() * topicTags.length)];
-      if (pick) {
-        activeTopics.add(pick);
-        renderTopicTags();
-        discoverMore([pick]);
-      }
-    }
   });
 
   // Minds page

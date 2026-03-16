@@ -34,6 +34,7 @@ from .core.db import (
     delete_agent,
     delete_chat_session,
     find_agent_by_name,
+    find_existing_upload,
     find_mind_by_name,
     get_agent,
     get_chat_session,
@@ -129,6 +130,11 @@ def _check_quota(request: Request, action: str) -> None:
     if os.getenv("ENABLE_AUTH"):
         from .pro.quota import check_quota
         check_quota(request, action)
+
+def _check_upload_limit(request: Request) -> None:
+    if os.getenv("ENABLE_AUTH"):
+        from .pro.quota import check_upload_limit
+        check_upload_limit(request)
 
 def _track_usage(request: Request, action: str, tokens: int = 0) -> None:
     if os.getenv("ENABLE_AUTH"):
@@ -610,6 +616,13 @@ def api_create_upload_agent(request: Request, background_tasks: BackgroundTasks,
     _check_quota(request, "upload")
     user_id = _get_user_id(request)
     name = Path(file.filename).stem if file.filename else "Uploaded Book"
+
+    existing = find_existing_upload(name)
+    if existing:
+        return {"id": existing["id"], "status": existing["status"], "duplicate": True, "name": existing["name"]}
+
+    _check_upload_limit(request)
+
     agent_id = create_agent(name=name, agent_type="upload", source=file.filename, meta={}, user_id=user_id)
     config.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     dest = config.UPLOAD_DIR / f"{agent_id}_{file.filename}"
@@ -632,6 +645,7 @@ def api_create_upload_agent(request: Request, background_tasks: BackgroundTasks,
 @app.post("/api/agents/topic")
 def api_create_topic_agent(payload: TopicAgentRequest, request: Request, background_tasks: BackgroundTasks) -> dict[str, Any]:
     _check_quota(request, "upload")
+    _check_upload_limit(request)
     topic = payload.topic.strip()
     if not topic:
         raise HTTPException(status_code=400, detail="Topic is required")

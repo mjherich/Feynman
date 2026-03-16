@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException, Request
 
-from ..core.db import count_usage_today, record_usage
+from ..core.db import count_usage_today, count_user_uploads, record_usage
 
 QUOTA_LIMITS = {
     "free": {
@@ -21,6 +21,11 @@ QUOTA_LIMITS = {
         "upload": 30,
         "custom_minds": 30,
     },
+}
+
+UPLOAD_TOTAL_LIMITS = {
+    "free": 3,
+    "pro": 50,
 }
 
 
@@ -49,6 +54,29 @@ def check_quota(request: Request, action: str) -> None:
                 "used": used,
                 "tier": tier,
                 "message": f"Daily {action} limit reached ({limit}). Upgrade to Pro for higher limits.",
+            },
+        )
+
+
+def check_upload_limit(request: Request) -> None:
+    """Check total upload limit (lifetime, not daily). Raises HTTP 429 if exceeded."""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        return
+
+    tier = getattr(request.state, "tier", "free")
+    limit = UPLOAD_TOTAL_LIMITS.get(tier, UPLOAD_TOTAL_LIMITS["free"])
+    used = count_user_uploads(user_id)
+    if used >= limit:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "upload_limit_reached",
+                "action": "upload",
+                "limit": limit,
+                "used": used,
+                "tier": tier,
+                "message": f"Upload limit reached ({used}/{limit} books). Upgrade to Pro to upload more.",
             },
         )
 
