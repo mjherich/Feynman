@@ -3519,8 +3519,12 @@ function _matchStrength(tokensA, tokensB) {
 
 function _buildGraphData(minds) {
   const now = Date.now();
-  const NEW_THRESHOLD_MS = 24 * 60 * 60 * 1000;
-  const nodes = minds.map(m => {
+  const lastVisit = parseInt(localStorage.getItem('minds_last_visit') || '0', 10);
+  const NEW_FALLBACK_MS = 24 * 60 * 60 * 1000;
+  const threshold = lastVisit > 0 ? lastVisit : (now - NEW_FALLBACK_MS);
+  const pendingNew = [];
+  const nodes = [];
+  for (const m of minds) {
     const node = {
       id: m.id, name: m.name, era: m.era || '',
       domain: m.domain || '', bio: m.bio_summary || '',
@@ -3530,13 +3534,22 @@ function _buildGraphData(minds) {
     };
     if (m.created_at) {
       const createdMs = new Date(m.created_at).getTime();
-      const age = now - createdMs;
-      if (age < NEW_THRESHOLD_MS) {
-        node._newAt = performance.now() - age;
+      if (createdMs > threshold) {
+        pendingNew.push({ node, createdMs });
+        continue;
       }
     }
-    return node;
-  });
+    nodes.push(node);
+  }
+
+  if (pendingNew.length > 0) {
+    pendingNew.sort((a, b) => a.createdMs - b.createdMs);
+    const STAGGER_MS = Math.min(600, 4000 / pendingNew.length);
+    const baseTime = performance.now() + 1200;
+    pendingNew.forEach((entry, i) => {
+      entry.arriveAt = baseTime + i * STAGGER_MS;
+    });
+  }
 
   const links = [];
   for (let i = 0; i < nodes.length; i++) {
@@ -3585,7 +3598,7 @@ function _buildGraphData(minds) {
       }
     }
   } catch (err) { console.warn('Failed to load custom links:', err); }
-  return { nodes, links };
+  return { nodes, links, pendingNew };
 }
 
 function renderMindsPage() {
@@ -3614,7 +3627,7 @@ function _renderMindsGraph() {
     return;
   }
 
-  const { nodes, links } = _buildGraphData(allMinds);
+  const { nodes, links, pendingNew } = _buildGraphData(allMinds);
   const dpr = window.devicePixelRatio || 1;
   const W = container.clientWidth || 900;
   const H = container.clientHeight || 600;
@@ -3789,6 +3802,22 @@ function _renderMindsGraph() {
 
   function draw() {
     time.now = performance.now();
+
+    while (pendingNew.length > 0 && time.now >= pendingNew[0].arriveAt) {
+      const entry = pendingNew.shift();
+      const m = entry.node;
+      m.bio_summary = m.bio;
+      const scored = [];
+      for (const existing of nodes) {
+        if (existing._isAdd) continue;
+        const s = _matchStrength(m.tokens, existing.tokens);
+        if (s > 0) scored.push({ node: existing, s });
+      }
+      scored.sort((a, b) => b.s - a.s);
+      const nearNode = scored.length > 0 ? scored[0].node : (nodes.find(d => !d._isAdd) || addNode);
+      _insertMindNode(m, nearNode);
+    }
+
     ctx.save();
     ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--canvas-bg').trim() || '#ffffff';
     ctx.fillRect(0, 0, W, H);
@@ -3962,9 +3991,15 @@ function _renderMindsGraph() {
           const fade = Math.max(0, 1 - age / 12);
           const ring = 1 + Math.sin(time.now * 0.004) * 0.5;
 
-          const outerR = rr + 12 + ring * 10;
+          const burstPhase = Math.min(1, age / 0.8);
+          const burstScale = burstPhase < 1
+            ? 1 + (1 - burstPhase) * 0.8
+            : 1;
+
+          const outerR = (rr + 12 + ring * 10) * burstScale;
           const glowG = ctx.createRadialGradient(n.x, n.y, rr * 0.5, n.x, n.y, outerR);
-          glowG.addColorStop(0, `rgba(34,197,94,${fade * 0.25})`);
+          const burstIntensity = burstPhase < 1 ? 0.4 : 0.25;
+          glowG.addColorStop(0, `rgba(34,197,94,${fade * burstIntensity})`);
           glowG.addColorStop(0.6, `rgba(34,197,94,${fade * 0.08})`);
           glowG.addColorStop(1, 'rgba(34,197,94,0)');
           ctx.beginPath();
@@ -3989,7 +4024,7 @@ function _renderMindsGraph() {
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText('NEW', n.x, badgeY);
-        } else {
+        } else if (age >= 12) {
           delete n._newAt;
         }
       }
@@ -4136,6 +4171,33 @@ function _renderMindsGraph() {
 
   sim.on('tick', () => {});
   draw();
+
+  const pendingCount = pendingNew.length;
+  if (pendingCount > 0) {
+    showToast(`${pendingCount} new mind${pendingCount > 1 ? 's' : ''} joined the network since your last visit`);
+  }
+  localStorage.setItem('minds_last_visit', String(Date.now()));
+
+  // Onboarding hint for new users
+  if (!localStorage.getItem('graphHintSeen')) {
+    const hint = document.createElement('div');
+    hint.className = 'graph-onboarding-hint';
+    hint.innerHTML = `
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+      <span>Click on any mind to <strong>discover nearby thinkers</strong></span>`;
+    container.appendChild(hint);
+    requestAnimationFrame(() => hint.classList.add('visible'));
+    const dismissHint = () => {
+      hint.classList.remove('visible');
+      setTimeout(() => hint.remove(), 500);
+      localStorage.setItem('graphHintSeen', '1');
+      canvas.removeEventListener('mousedown', dismissHint);
+      canvas.removeEventListener('touchstart', dismissHint);
+    };
+    canvas.addEventListener('mousedown', dismissHint);
+    canvas.addEventListener('touchstart', dismissHint);
+    setTimeout(dismissHint, 12000);
+  }
 
   function _getNodeAt(cx, cy) {
     const [mx, my] = transform.invert([cx, cy]);

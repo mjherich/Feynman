@@ -1677,6 +1677,65 @@ body {
   background: var(--accent); color: #fff;
 }
 
+.graph-onboarding-hint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) translateY(8px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 22px;
+  border-radius: 20px;
+  background: rgba(255,255,255,0.45);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid rgba(255,255,255,0.5);
+  box-shadow: 0 2px 16px rgba(0,0,0,0.06), 0 0 0 0.5px rgba(0,0,0,0.04);
+  color: var(--text-secondary, #6e6e73);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.6s ease, transform 0.6s ease;
+  z-index: 15;
+  white-space: nowrap;
+}
+.graph-onboarding-hint.visible {
+  opacity: 1;
+  transform: translate(-50%, -50%);
+}
+.graph-onboarding-hint svg {
+  flex-shrink: 0;
+  opacity: 0.45;
+}
+.graph-onboarding-hint strong {
+  font-weight: 600;
+  color: var(--text, #1d1d1f);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) .graph-onboarding-hint {
+    background: rgba(255,255,255,0.08);
+    border-color: rgba(255,255,255,0.12);
+    box-shadow: 0 2px 20px rgba(0,0,0,0.3), 0 0 0 0.5px rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.55);
+  }
+  :root:not(.light) .graph-onboarding-hint strong {
+    color: rgba(255,255,255,0.8);
+  }
+}
+:root.dark .graph-onboarding-hint {
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.12);
+  box-shadow: 0 2px 20px rgba(0,0,0,0.3), 0 0 0 0.5px rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.55);
+}
+:root.dark .graph-onboarding-hint strong {
+  color: rgba(255,255,255,0.8);
+}
+
 /* Keep mind-avatar for detail page & perspectives */
 .mind-avatar {
   width: 48px;
