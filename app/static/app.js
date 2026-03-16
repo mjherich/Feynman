@@ -3619,11 +3619,13 @@ function _renderMindsGraph() {
 
   let transform = d3.zoomIdentity;
   let _isOnNode = false;
+  let _isDraggingNode = false;
   const zoomBehavior = d3.zoom()
     .scaleExtent([0.1, 6])
     .filter((e) => {
       if (e.type === 'wheel') return true;
       if (e.type === 'dblclick') return true;
+      if (_isDraggingNode) return false;
       if (_isOnNode) return false;
       return true;
     })
@@ -4268,6 +4270,13 @@ function _renderMindsGraph() {
 
   let _dragStartPos = null;
 
+  function _screenToWorld(e) {
+    const rect = canvas.getBoundingClientRect();
+    const sx = e.sourceEvent.clientX - rect.left;
+    const sy = e.sourceEvent.clientY - rect.top;
+    return transform.invert([sx, sy]);
+  }
+
   d3.select(canvas).call(
     d3.drag()
       .subject((e) => {
@@ -4280,6 +4289,7 @@ function _renderMindsGraph() {
       })
       .on('start', (e) => {
         if (!e.subject) return;
+        _isDraggingNode = true;
         if (!e.active) sim.alphaTarget(0.3).restart();
         _dragStartPos = { x: e.subject.x, y: e.subject.y };
         e.subject.fx = e.subject.x;
@@ -4287,7 +4297,7 @@ function _renderMindsGraph() {
       })
       .on('drag', (e) => {
         if (!e.subject) return;
-        const [mx, my] = transform.invert([e.x, e.y]);
+        const [mx, my] = _screenToWorld(e);
         e.subject.fx = mx;
         e.subject.fy = my;
 
@@ -4308,6 +4318,7 @@ function _renderMindsGraph() {
       })
       .on('end', (e) => {
         if (!e.subject) return;
+        _isDraggingNode = false;
         if (!e.active) sim.alphaTarget(0);
         const dragged = e.subject;
         const dropTarget = state._dragDropTarget;
@@ -4319,7 +4330,7 @@ function _renderMindsGraph() {
           const movedDist = Math.sqrt(
             (dragged.x - _dragStartPos.x) ** 2 + (dragged.y - _dragStartPos.y) ** 2
           );
-          if (movedDist > BASE_R * 2) {
+          if (movedDist > BASE_R) {
             const alreadyLinked = links.some(l => {
               const sid = typeof l.source === 'object' ? l.source.id : l.source;
               const tid = typeof l.target === 'object' ? l.target.id : l.target;
