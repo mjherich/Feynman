@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -288,7 +289,7 @@ class AnthropicProvider(BaseProvider):
         self.chat_model = chat_model
 
     def has_key(self) -> bool:
-        return bool(self.api_key)
+        return bool(self.api_key) or self.base_url != "https://api.anthropic.com"
 
     def chat(self, system: str, user: str, history: list[dict[str, str]] | None = None, use_grounding: bool = False) -> ChatResult:
         messages: list[dict[str, Any]] = []
@@ -303,14 +304,18 @@ class AnthropicProvider(BaseProvider):
         if system:
             payload["system"] = system
         headers = {
-            "x-api-key": self.api_key,
             "anthropic-version": "2023-06-01",
             "Content-Type": "application/json",
         }
+        if self.api_key:
+            headers["x-api-key"] = self.api_key
         with httpx.Client(timeout=_CHAT_TIMEOUT) as client:
             resp = client.post(f"{self.base_url}/v1/messages", headers=headers, json=payload)
         if resp.status_code >= 400:
             raise ProviderError(f"anthropic error {resp.status_code}: {resp.text}")
+        ctype = resp.headers.get("content-type", "")
+        if "text/event-stream" in ctype or resp.text.lstrip().startswith("event:"):
+            return self._parse_sse(resp.text)
         data = resp.json()
         content = "".join(b.get("text", "") for b in data.get("content", []))
         usage = None
@@ -322,6 +327,45 @@ class AnthropicProvider(BaseProvider):
                 total_tokens=u.get("input_tokens", 0) + u.get("output_tokens", 0),
             )
         return ChatResult(content=content, raw=data, usage=usage)
+
+    @staticmethod
+    def _parse_sse(body: str) -> ChatResult:
+        text_parts: list[str] = []
+        input_tokens = 0
+        output_tokens = 0
+        raw: dict[str, Any] = {"events": []}
+        for line in body.splitlines():
+            if not line.startswith("data:"):
+                continue
+            payload_str = line[5:].strip()
+            if not payload_str or payload_str == "[DONE]":
+                continue
+            try:
+                evt = json.loads(payload_str)
+            except json.JSONDecodeError:
+                continue
+            raw["events"].append(evt)
+            etype = evt.get("type")
+            if etype == "content_block_delta":
+                delta = evt.get("delta", {})
+                if delta.get("type") == "text_delta":
+                    text_parts.append(delta.get("text", ""))
+            elif etype == "message_start":
+                u = (evt.get("message") or {}).get("usage") or {}
+                input_tokens = u.get("input_tokens", input_tokens) or input_tokens
+                output_tokens = u.get("output_tokens", output_tokens) or output_tokens
+            elif etype == "message_delta":
+                u = evt.get("usage") or {}
+                if "input_tokens" in u:
+                    input_tokens = u["input_tokens"] or input_tokens
+                if "output_tokens" in u:
+                    output_tokens = u["output_tokens"] or output_tokens
+        usage = TokenUsage(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
+        )
+        return ChatResult(content="".join(text_parts), raw=raw, usage=usage)
 
 
 def _anthropic_provider() -> AnthropicProvider:

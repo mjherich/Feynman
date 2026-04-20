@@ -1,0 +1,26 @@
+services:
+  feynman:
+    build: .
+    container_name: feynman
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${FEYNMAN_PORT:-8083}:8080"
+    environment:
+      DATA_DIR: /app/data
+      DB_PATH: /app/data/chatbook.db
+      PROVIDER_ORDER: anthropic
+      CHAT_PROVIDER: anthropic
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-https://better-ccflare.lynx-crocodile.ts.net}
+      ANTHROPIC_CHAT_MODEL: ${ANTHROPIC_CHAT_MODEL:-claude-opus-4-7}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - feynman-data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  feynman-data:
